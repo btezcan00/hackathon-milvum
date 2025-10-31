@@ -12,6 +12,7 @@ from services.url_selector import URLSelector
 import logging
 from datetime import datetime
 import uuid
+from typing import List, Dict
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -115,87 +116,262 @@ def upload_file():
         logger.error(f"Error processing file: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+def decide_chat_mode(query: str, conversation_history: List[Dict[str, str]]) -> str:
+    """
+    AI Orchestrator: Intelligently decides whether to use RAG (document retrieval) 
+    or plain chat based on user intent.
+    
+    Args:
+        query: Current user query
+        conversation_history: Recent conversation messages
+    
+    Returns:
+        "rag" for document retrieval, "plain" for conversational chat
+    """
+    orchestrator_system_prompt = """You are an intelligent routing system for a Dutch government document assistant (WOO - Wet open overheid).
+
+Your task is to analyze the user's query and determine if they need:
+1. **RAG (Document Retrieval)** - Retrieve and cite specific information from official documents
+2. **PLAIN (Conversational Chat)** - Continue natural conversation, elaborate, clarify, or discuss
+
+**RESPOND WITH ONLY ONE WORD: "rag" OR "plain"**
+
+---
+
+**Use RAG when the user:**
+- Asks factual questions requiring specific information from documents
+  Examples: "Wat is het registratienummer?", "Welke datum staat in het document?", "Wat zegt de gemeente over...?"
+- Requests quotes, citations, or references from documents
+  Examples: "Citeer de relevante sectie", "Waar staat dat in het document?"
+- Wants to search, find, or look up specific information
+  Examples: "Zoek documenten over...", "Geef me informatie over...", "Welke documenten gaan over...?"
+- Asks questions starting with: "Wat", "Waar", "Wanneer", "Welk", "Hoeveel" (about document content)
+- Needs verification of facts, dates, names, or numbers
+  Examples: "Klopt het dat...?", "Is het waar dat...?", "Welke afdeling heeft dit geschreven?"
+- Requests summaries or overviews of document content
+  Examples: "Vat dit document samen", "Geef me een overzicht van..."
+- Wants to compare information across multiple documents
+- Asks about legal grounds, policy details, or official statements
+
+**Use PLAIN when the user:**
+- Asks for clarification about the previous answer
+  Examples: "Kun je dat uitleggen?", "Wat bedoel je daarmee?", "Hoe werkt dat precies?"
+- Wants elaboration or more detail about something already discussed
+  Examples: "Vertel me meer daarover", "Kun je dat verder toelichten?", "Ga dieper in op..."
+- Engages in follow-up questions about the assistant's explanation
+  Examples: "Dus als ik het goed begrijp...", "Betekent dit dat...?", "Dus wat je zegt is..."
+- Makes casual conversation or expresses opinions/reactions
+  Examples: "Interessant!", "Dank je", "Oké, begrepen", "Dat is duidelijk"
+- Asks about the assistant's capabilities or how to use the system
+  Examples: "Wat kun je voor me doen?", "Hoe werk je?", "Wat voor vragen kan ik stellen?"
+- Requests reasoning, explanation, or interpretation (not document quotes)
+  Examples: "Waarom is dat zo?", "Wat is het verschil tussen...?", "Hoe zou ik dit interpreteren?"
+- Asks hypothetical or scenario-based questions
+  Examples: "Wat zou er gebeuren als...?", "Stel dat...", "Hoe zou jij..."
+- Continues a topic without needing new document information
+- Asks for examples, analogies, or simplified explanations
+
+**Edge cases:**
+- If the query contains both elements, prefer RAG (better to over-retrieve than miss information)
+- If in doubt and the conversation is just starting, prefer RAG
+- If the user explicitly says "zoek", "vind", "geef documenten", always use RAG
+- If the user says "leg uit", "vertel", "wat denk je", prefer PLAIN
+
+**Context awareness:**
+- Review the last 2-3 conversation turns
+- If the user is drilling down on a topic already covered, prefer PLAIN
+- If the user introduces a new topic or question, prefer RAG
+
+**Remember:** Your ONLY output should be the word "rag" or "plain" - nothing else."""
+
+    messages = [
+        {"role": "system", "content": orchestrator_system_prompt},
+    ]
+    
+    # Add last 4 conversation turns for context (2 exchanges)
+    recent_history = conversation_history[-4:] if len(conversation_history) > 4 else conversation_history
+    messages.extend(recent_history)
+    
+    # Add the current query with explicit instruction
+    messages.append({
+        "role": "user", 
+        "content": f"Query to analyze: \"{query}\"\n\nShould this use RAG or PLAIN? Respond with only one word."
+    })
+
+    try:
+        # Use the chat_service to get the mode
+        response = chat_service.chat(messages).strip().lower()
+        
+        # Parse response (handle edge cases)
+        if "rag" in response:
+            return "rag"
+        elif "plain" in response:
+            return "plain"
+        else:
+            # Default to RAG if unclear
+            logger.warning(f"Orchestrator returned unclear response: {response}. Defaulting to RAG.")
+            return "rag"
+    except Exception as e:
+        logger.error(f"Error in orchestrator: {e}. Defaulting to RAG.")
+        return "rag"
+
+
 @app.route('/api/chat', methods=['POST'])
 def chat():
-    """Chat endpoint - RAG query with LLM response and conversation memory"""
+    """
+    Unified intelligent chat endpoint with AI orchestration.
+    Automatically determines whether to use RAG or plain chat.
+    """
     try:
         data = request.get_json()
         query = data.get('query', '')
-        conversation_id = data.get('conversation_id', None)  # Optional conversation ID
-        
+        conversation_id = data.get('conversation_id', None)
+        force_mode = data.get('mode', None)  # Optional: allow manual override
+
         if not query:
             return jsonify({'error': 'Query is required'}), 400
-        
+
         # Create or retrieve conversation
         if not conversation_id:
             conversation_id = str(uuid.uuid4())
             conversations[conversation_id] = []
         elif conversation_id not in conversations:
             conversations[conversation_id] = []
-        
+
         logger.info(f"Processing query in conversation {conversation_id}: {query}")
-        
-        # Get relevant documents from vector search with reranking
-        # Retrieve 30 documents from Pinecone, then rerank to top 5
-        search_results = rag_service.query(
-            query=query, 
-            top_k=5,        # Final number of documents after reranking
-            initial_k=30    # Initial retrieval from Pinecone
-        )
-        
-        # Build context from retrieved documents
-        context = "\n\n".join([doc.get('text', '') for doc in search_results['sources']])
-        
+
+        # Decide mode: use forced mode or orchestrator
+        if force_mode in ["rag", "plain"]:
+            mode = force_mode
+            logger.info(f"Using forced mode: {mode}")
+        else:
+            mode = decide_chat_mode(query, conversations[conversation_id])
+            logger.info(f"🤖 Orchestrator chose mode: {mode}")
+
+        # Execute based on mode
+        if mode == "plain":
+            # Plain conversational chat
+            messages = [
+                {
+                    "role": "system",
+                    "content": "Je bent een behulpzame assistent voor de Nederlandse overheid (WOO - Wet open overheid). Beantwoord vragen op een heldere, professionele en toegankelijke manier. Onthoud eerdere berichten in het gesprek en ga natuurlijk verder met de conversatie."
+                }
+            ]
+            messages.extend(conversations[conversation_id])
+            messages.append({
+                "role": "user",
+                "content": query
+            })
+            answer = chat_service.chat(messages)
+            sources = []
+            
+        else:  # mode == "rag"
+            # RAG: Retrieve documents and answer with context
+            search_results = rag_service.query(
+                query=query,
+                top_k=5,
+                initial_k=30
+            )
+            
+            # Build context from retrieved documents
+            context = "\n\n".join([
+                f"Document: {doc.get('metadata', {}).get('document_name', 'Onbekend')}\n{doc.get('text', '')}"
+                for doc in search_results['sources']
+            ])
+            
+            messages = [
+                {
+                    "role": "system",
+                    "content": """Je bent een behulpzame assistent voor de Nederlandse overheid (WOO - Wet open overheid). 
+
+Je taak:
+1. Beantwoord de vraag van de gebruiker op basis van de verstrekte documentcontext
+2. Citeer specifieke informatie uit de documenten wanneer relevant
+3. Als de context niet voldoende informatie bevat, zeg dit eerlijk
+4. Blijf professioneel en helder in je uitleg
+5. Gebruik eerdere berichten in het gesprek om context te behouden
+
+Antwoord altijd in het Nederlands."""
+                }
+            ]
+            
+            messages.extend(conversations[conversation_id])
+            messages.append({
+                "role": "user",
+                "content": f"""Context uit documenten:
+{context}
+
+Vraag van gebruiker: {query}
+
+Geef een helder antwoord op basis van de bovenstaande context."""
+            })
+            
+            answer = chat_service.chat(messages)
+            sources = search_results['sources']
+
+        # Store conversation
+        conversations[conversation_id].append({
+            "role": "user",
+            "content": query
+        })
+        conversations[conversation_id].append({
+            "role": "assistant",
+            "content": answer
+        })
+
+        # Limit history
+        if len(conversations[conversation_id]) > 20:
+            conversations[conversation_id] = conversations[conversation_id][-20:]
+
+        return jsonify({
+            'answer': answer,
+            'sources': sources,
+            'query': query,
+            'conversation_id': conversation_id,
+            'message_count': len(conversations[conversation_id]),
+            'mode': mode  # Return which mode was used
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Error processing chat: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/chat-plain', methods=['POST'])
+def chat_plain():
+    """Chat endpoint - plain LLM conversation, no RAG, with memory"""
+    try:
+        data = request.get_json()
+        query = data.get('query', '')
+        conversation_id = data.get('conversation_id', None)  # Optional conversation ID
+
+        if not query:
+            return jsonify({'error': 'Query is required'}), 400
+
+        # Create or retrieve conversation
+        if not conversation_id:
+            conversation_id = str(uuid.uuid4())
+            conversations[conversation_id] = []
+        elif conversation_id not in conversations:
+            conversations[conversation_id] = []
+
+        logger.info(f"Processing plain chat in conversation {conversation_id}: {query}")
+
         # Build conversation history for LLM
         messages = [
             {
                 "role": "system",
-                "content": "You are a helpful assistant. Answer the user's question based on the provided context and conversation history. If the context doesn't contain relevant information, say so. Maintain context from previous messages in the conversation."
+                "content": "You are a helpful assistant. Continue the conversation naturally and remember previous messages."
             }
         ]
-        
-        # Add conversation history
         messages.extend(conversations[conversation_id])
-        
-        def generate_stream():
-            try:
-                has_content = False
-                for chunk in chat_service.chat_stream(messages):
-                    if chunk:
-                        has_content = True
-                        # Format as SSE (Server-Sent Events)
-                        yield f"data: {json.dumps({'type': 'text', 'text': chunk})}\n\n"
-                
-                # If no content was received, it might be an error
-                if not has_content:
-                    error_msg = "Geen antwoord ontvangen van de LLM service. Controleer uw API-sleutels."
-                    yield f"data: {json.dumps({'type': 'error', 'error': error_msg})}\n\n"
-                else:
-                    # Send completion signal
-                    yield f"data: [DONE]\n\n"
-                
-            except Exception as e:
-                logger.error(f"Error in streaming: {str(e)}")
-                # Send user-friendly error message
-                error_message = str(e)
-                if "401" in error_message or "Unauthorized" in error_message:
-                    error_message = "Authenticatiefout: Controleer of uw GROQ_API_KEY correct is ingesteld in de .env file."
-                elif "404" in error_message:
-                    error_message = "Model niet gevonden. Controleer of het model naam correct is."
-                else:
-                    error_message = f"Fout bij het genereren van antwoord: {str(e)}"
-                
-                yield f"data: {json.dumps({'type': 'error', 'error': error_message})}\n\n"
-                yield f"data: [DONE]\n\n"
-        # Add current query with context
         messages.append({
             "role": "user",
-            "content": f"Context from documents:\n{context}\n\nUser question: {query}"
+            "content": query
         })
-        
+
         # Generate answer using ChatService
         answer = chat_service.chat(messages)
-        
+
         # Store this exchange in conversation history
         conversations[conversation_id].append({
             "role": "user",
@@ -205,23 +381,23 @@ def chat():
             "role": "assistant",
             "content": answer
         })
-        
+
         # Limit conversation history to last 10 exchanges (20 messages)
         if len(conversations[conversation_id]) > 20:
             conversations[conversation_id] = conversations[conversation_id][-20:]
-        
+
         return jsonify({
             'answer': answer,
-            'sources': search_results['sources'],
             'query': query,
             'conversation_id': conversation_id,
             'message_count': len(conversations[conversation_id])
         }), 200
-    
-    except Exception as e:
-        logger.error(f"Error processing query: {str(e)}")
-        return jsonify({'error': str(e)}), 500
 
+    except Exception as e:
+        logger.error(f"Error processing plain chat: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+    
+    
 @app.route('/api/research', methods=['POST'])
 def research():
     """Deep research endpoint - Crawl web sources and return answer with citations"""
