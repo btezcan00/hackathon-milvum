@@ -15,11 +15,6 @@ services:
     restart: unless-stopped
     networks:
       - rag_network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
   # Backend API
   backend:
@@ -28,30 +23,23 @@ services:
       dockerfile: Dockerfile
     container_name: rag_backend
     ports:
-      - "5000:5000"
+      - "5050:5000"
+    env_file:
+      - .env
     environment:
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
-    depends_on:
-      qdrant:
-        condition: service_healthy
+      - PYTHONUNBUFFERED=1
     networks:
       - rag_network
     restart: unless-stopped
-
-  # Frontend
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    container_name: rag_frontend
-    ports:
-      - "8080:80"
+    command: >
+      sh -c "
+        echo 'Waiting for Qdrant to be ready...' &&
+        python app.py
+      "
     depends_on:
-      - backend
-    networks:
-      - rag_network
-    restart: unless-stopped
+      - qdrant
 
 networks:
   rag_network:

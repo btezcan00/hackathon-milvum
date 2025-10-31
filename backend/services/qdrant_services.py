@@ -1,4 +1,4 @@
-from client_qdrant import QdrantClient
+from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue
 from typing import List, Dict, Any
 import uuid
@@ -7,7 +7,7 @@ class QdrantRAGClient:
     def __init__(self, host: str = "localhost", port: int = 6333):
         """Initialize Qdrant client for RAG operations"""
         self.client = QdrantClient(host=host, port=port)
-        self.collection_name = "rag_documents"
+        self.collection_name = "all_documents"
         
     def create_collection(self, vector_size: int = 1024, distance: Distance = Distance.COSINE):
         """
@@ -20,7 +20,7 @@ class QdrantRAGClient:
         try:
             self.client.create_collection(
                 collection_name=self.collection_name,
-                vectors_config=VectorParams(size=vector_size, distance=distance, dtype="float")
+                vectors_config=VectorParams(size=vector_size, distance=distance)
             )
             print(f"Collection '{self.collection_name}' created successfully")
         except Exception as e:
@@ -126,46 +126,3 @@ class QdrantRAGClient:
         """Get information about the collection"""
         info = self.client.get_collection(collection_name=self.collection_name)
         return info
-
-
-# Example usage
-if __name__ == "__main__":
-    # Initialize client
-    rag_client = QdrantRAGClient(host="localhost", port=6333)
-
-    # Create collection (1024 dimensions, float vectors)
-    rag_client.create_collection(vector_size=1024)
-
-    # Example: Insert documents (you'll need actual embeddings)
-    sample_docs = [
-        {
-            'text': 'Introduction to machine learning',
-            'source': 'ml_book.pdf',
-            'page': 1,
-            'category': 'ML',
-            'author': 'John Doe'
-        },
-        {
-            'text': 'Deep learning fundamentals',
-            'source': 'dl_paper.pdf',
-            'page': 5,
-            'category': 'DL',
-            'author': 'Jane Smith'
-        }
-    ]
-
-    # You'll need to generate actual embeddings (e.g., using OpenAI API)
-    sample_vectors = [[0.1] * 1024, [0.2] * 1024]  # Placeholder vectors of type float
-
-    # Upsert documents
-    rag_client.upsert_documents(sample_docs, sample_vectors)
-
-    # Search with metadata filters
-    query_vector = [0.15] * 1024  # Placeholder query vector of type float
-    results = rag_client.search_with_metadata(
-        query_vector=query_vector,
-        filters={'category': 'ML'},
-        limit=3
-    )
-
-    print("Search results:", results)
