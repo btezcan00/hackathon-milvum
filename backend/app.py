@@ -132,8 +132,13 @@ def chat():
         
         logger.info(f"Processing query in conversation {conversation_id}: {query}")
         
-        # Get relevant documents from vector search
-        search_results = rag_service.query(query=query, top_k=5)
+        # Get relevant documents from vector search with reranking
+        # Retrieve 30 documents from Pinecone, then rerank to top 5
+        search_results = rag_service.query(
+            query=query, 
+            top_k=5,        # Final number of documents after reranking
+            initial_k=30    # Initial retrieval from Pinecone
+        )
         
         # Build context from retrieved documents
         context = "\n\n".join([doc.get('text', '') for doc in search_results['sources']])

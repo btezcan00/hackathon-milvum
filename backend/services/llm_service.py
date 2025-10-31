@@ -107,3 +107,4 @@ class ChatService:
                                 yield delta['content']
                     except json.JSONDecodeError:
                         continue
+    

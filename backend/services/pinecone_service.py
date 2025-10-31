@@ -4,12 +4,11 @@ import uuid
 import os
 
 class PineconeRAGClient:
-    def __init__(self, api_key: str = None, environment: str = None):
+    def __init__(self, api_key: str = None):
         """Initialize Pinecone client for RAG operations"""
         self.api_key = api_key or os.getenv("PINECONE_API_KEY")
-        self.environment = environment or os.getenv("PINECONE_ENVIRONMENT", "us-east-1")
         self.pc = Pinecone(api_key=self.api_key)
-        self.index_name = "all-documents"
+        self.index_name = "hackathon-milvum"
         self.index = None
         
     def create_index(self, dimension: int = 1536, metric: str = "cosine"):
@@ -28,7 +27,6 @@ class PineconeRAGClient:
                     metric=metric,
                     spec=ServerlessSpec(
                         cloud='aws',
-                        region=self.environment
                     )
                 )
                 print(f"Index '{self.index_name}' created successfully")
