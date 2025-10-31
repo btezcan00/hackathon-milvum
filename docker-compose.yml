@@ -8,16 +8,13 @@ services:
     ports:
       - "5001:5001"
     env_file:
-      - ./backend/.env
+      - .env
     environment:
       - PYTHONUNBUFFERED=1
     networks:
       - rag_network
     restart: unless-stopped
     command: /bin/sh -c "python app.py"
-    depends_on:
-      - qdrant
-
 networks:
   rag_network:
     driver: bridge
