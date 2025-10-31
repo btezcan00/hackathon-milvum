@@ -1,5 +1,6 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
+import json
 from werkzeug.utils import secure_filename
 import os
 from services.document_processor import DocumentProcessor
@@ -88,11 +89,19 @@ def upload_file():
 
 @app.route('/api/chat', methods=['POST'])
 def chat():
-    """Chat endpoint - RAG query with LLM response"""
+    """Streaming chat endpoint - RAG query with LLM response"""
     try:
         data = request.get_json()
         logger.info(f"Received data: {data}")
-        query = data.get('query', '') if data else ''
+        
+        # Handle both 'query' and 'messages' formats
+        if 'messages' in data:
+            # Extract last user message
+            messages = data['messages']
+            last_message = messages[-1] if messages else {}
+            query = last_message.get('content', '') if last_message.get('role') == 'user' else ''
+        else:
+            query = data.get('query', '') if data else ''
 
         if not query:
             logger.warning(f"Empty query received. Data: {data}")
@@ -102,30 +111,55 @@ def chat():
         
         # Get relevant documents from vector search
         search_results = rag_service.query(query=query, top_k=5)
-        logger.info(f"Search results: {search_results}")
+        logger.info(f"Found {len(search_results['sources'])} relevant sources")
         
         # Build context from retrieved documents
         context = "\n\n".join([doc.get('text', '') for doc in search_results['sources']])
         
-        # Generate answer using ChatService
-        messages = [
+        # Prepare system message with context
+        system_content = "Je bent een behulpzame assistent voor de Nederlandse overheid. Beantwoord vragen op basis van de verstrekte context uit officiële documenten. Als de context geen relevante informatie bevat, geef dit duidelijk aan. Antwoord altijd in het Nederlands."
+        
+        if context.strip():
+            system_content += f"\n\nContext uit geüploade documenten:\n{context}"
+        
+        # Generate streaming response using ChatService
+        llm_messages = [
             {
                 "role": "system",
-                "content": "You are a helpful assistant. Answer the user's question based on the provided context. If the context doesn't contain relevant information, say so."
+                "content": system_content
             },
             {
                 "role": "user",
-                "content": f"Context:\n{context}\n\nQuestion: {query}"
+                "content": query
             }
         ]
-        logger.info(f"Messages for LLM: {messages}")
-        answer = chat_service.chat(messages)
         
-        return jsonify({
-            'answer': answer,
-            'sources': search_results['sources'],
-            'query': query
-        }), 200
+        logger.info(f"Messages for LLM: {llm_messages}")
+        
+        def generate_stream():
+            try:
+                for chunk in chat_service.chat_stream(llm_messages):
+                    if chunk:
+                        # Format as SSE (Server-Sent Events)
+                        yield f"data: {json.dumps({'type': 'text', 'text': chunk})}\n\n"
+                
+                # Send completion signal
+                yield f"data: [DONE]\n\n"
+                
+            except Exception as e:
+                logger.error(f"Error in streaming: {str(e)}")
+                yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
+        
+        return Response(
+            generate_stream(),
+            mimetype='text/event-stream',
+            headers={
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Headers': 'Content-Type'
+            }
+        )
     
     except Exception as e:
         logger.error(f"Error processing query: {str(e)}")

@@ -4,74 +4,47 @@ export async function POST(req: Request) {
   try {
     const { messages } = await req.json();
 
-    // Get the last user message
-    const lastMessage = messages[messages.length - 1];
-    if (!lastMessage || lastMessage.role !== 'user') {
-      return new Response('Invalid request', { status: 400 });
+    // Validate messages
+    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      return new Response('Invalid request: messages required', { status: 400 });
     }
 
-    // Extract text from message
-    const userQuery = lastMessage.content || '';
+    // Send messages directly to backend for RAG processing and streaming
+    const backendResponse = await fetch(`${BACKEND_URL}/api/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ messages }),
+    });
 
-    // Call backend RAG service which handles both retrieval and generation
-    try {
-      const ragResponse = await fetch(`${BACKEND_URL}/api/chat`, {
-        method: 'POST',
+    if (!backendResponse.ok) {
+      const errorData = await backendResponse.json().catch(() => ({ error: backendResponse.statusText }));
+      throw new Error(`Backend error: ${backendResponse.status} - ${errorData.error || backendResponse.statusText}`);
+    }
+
+    // Check if response is streaming
+    const contentType = backendResponse.headers.get('content-type');
+    if (contentType && contentType.includes('text/event-stream')) {
+      // Return the streaming response directly from backend
+      return new Response(backendResponse.body, {
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
         },
-        body: JSON.stringify({ query: userQuery }),
       });
-
-      if (!ragResponse.ok) {
-        const errorData = await ragResponse.json().catch(() => ({ error: ragResponse.statusText }));
-        throw new Error(`Backend error: ${ragResponse.status} - ${errorData.error || ragResponse.statusText}`);
-      }
-
-      const ragData = await ragResponse.json();
-      
-      // Create a streaming response that sends the answer
+    } else {
+      // Handle non-streaming response (fallback)
+      const data = await backendResponse.json();
       const encoder = new TextEncoder();
+      
       const stream = new ReadableStream({
         start(controller) {
-          // Send the answer as a streaming response
-          const answer = ragData.answer || 'Ik kon geen antwoord vinden op uw vraag.';
-          
-          // Split the answer into chunks for streaming effect
-          const words = answer.split(' ');
-          let currentChunk = '';
-          
-          const sendChunk = (index: number) => {
-            if (index >= words.length) {
-              // Send final chunk and close
-              controller.enqueue(encoder.encode(`data: {"type":"text","text":""}
-
-`));
-              controller.enqueue(encoder.encode(`data: [DONE]
-
-`));
-              controller.close();
-              return;
-            }
-            
-            currentChunk += (index > 0 ? ' ' : '') + words[index];
-            
-            // Send chunk every few words
-            if (index % 3 === 0 || index === words.length - 1) {
-              const chunk = {
-                type: 'text',
-                text: currentChunk
-              };
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`));
-              currentChunk = '';
-            }
-            
-            // Continue with next word after a small delay
-            setTimeout(() => sendChunk(index + 1), 50);
-          };
-          
-          // Start sending chunks
-          sendChunk(0);
+          const answer = data.answer || 'Ik kon geen antwoord vinden op uw vraag.';
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text', text: answer })}\n\n`));
+          controller.enqueue(encoder.encode(`data: [DONE]\n\n`));
+          controller.close();
         }
       });
 
@@ -82,10 +55,6 @@ export async function POST(req: Request) {
           'Connection': 'keep-alive',
         },
       });
-      
-    } catch (ragError) {
-      console.error('RAG service error:', ragError);
-      throw ragError;
     }
     
   } catch (error: any) {
