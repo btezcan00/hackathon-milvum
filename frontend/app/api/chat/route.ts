@@ -2,20 +2,36 @@ const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:500
 
 export async function POST(req: Request) {
   try {
-    const { messages } = await req.json();
-
-    // Validate messages
-    if (!messages || !Array.isArray(messages) || messages.length === 0) {
-      return new Response('Invalid request: messages required', { status: 400 });
+    const body = await req.json();
+    
+    // Backend expects { query } format, but frontend may send { messages }
+    // Extract query from messages if needed
+    let query = body.query;
+    let conversation_id = body.conversation_id;
+    
+    if (body.messages && Array.isArray(body.messages) && body.messages.length > 0) {
+      // Find the last user message
+      const lastUserMessage = body.messages.slice().reverse().find((msg: any) => msg.role === 'user');
+      if (lastUserMessage) {
+        query = lastUserMessage.content;
+      }
     }
 
-    // Send messages directly to backend for RAG processing and streaming
+    // Validate query
+    if (!query) {
+      return new Response('Invalid request: query is required', { status: 400 });
+    }
+
+    // Send to backend in the format it expects
     const backendResponse = await fetch(`${BACKEND_URL}/api/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ messages }),
+      body: JSON.stringify({ 
+        query: query,
+        conversation_id: conversation_id
+      }),
     });
 
     if (!backendResponse.ok) {
