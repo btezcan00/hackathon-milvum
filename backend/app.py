@@ -260,10 +260,28 @@ def research():
                 web_crawler.allowed_domains = domain_filter
             
             # Crawl URLs
+            # Use a single event loop for both crawling and cleanup to avoid loop conflicts
             logger.info(f"Crawling {len(urls)} URLs...")
-            crawled_content = asyncio.run(
-                web_crawler.crawl_urls(urls, query)
-            )
+            
+            # Create event loop for this request
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            crawled_content = []
+            try:
+                crawled_content = loop.run_until_complete(
+                    web_crawler.crawl_urls(urls, query)
+                )
+            finally:
+                # Always clean up in the same loop, even if crawling failed
+                try:
+                    loop.run_until_complete(web_crawler.close())
+                except Exception as e:
+                    # Cleanup errors are non-critical - browser processes will be cleaned up by OS
+                    logger.debug(f"Non-critical cleanup error (browser will auto-cleanup): {str(e)}")
+                finally:
+                    loop.close()
+                    # Clear the event loop from thread-local storage
+                    asyncio.set_event_loop(None)
             
             if not crawled_content:
                 return jsonify({
@@ -337,12 +355,6 @@ def research():
         except Exception as e:
             logger.error(f"Error in research: {str(e)}")
             return jsonify({'error': f'Research error: {str(e)}'}), 500
-        finally:
-            # Clean up crawler
-            try:
-                asyncio.run(web_crawler.close())
-            except Exception as e:
-                logger.warning(f"Error closing crawler: {str(e)}")
     
     except Exception as e:
         logger.error(f"Error processing research request: {str(e)}")

@@ -5,28 +5,15 @@ import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from urllib.parse import urlparse
-# Try to import Crawl4AI - make it optional to allow backend to start
-# Crawl4AI API may vary by version
+# Make Crawl4AI completely optional - backend can start without it
+# User will get an error when trying to use research feature if not available
 CRAWL4AI_AVAILABLE = False
-Crawler = None
-BrowserConfig = None
-AsyncWebCrawler = None
-
 try:
-    # Try new API first (v0.4+)
-    from crawl4ai import AsyncWebCrawler
+    import crawl4ai
+    # Don't import anything yet - just check if package exists
     CRAWL4AI_AVAILABLE = True
-    AsyncWebCrawler = AsyncWebCrawler
-except ImportError:
-    try:
-        # Try old API
-        from crawl4ai import Crawler, BrowserConfig
-        CRAWL4AI_AVAILABLE = True
-        Crawler = Crawler
-        BrowserConfig = BrowserConfig
-    except ImportError:
-        # Crawl4AI not available or different API
-        CRAWL4AI_AVAILABLE = False
+except:
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -74,14 +61,8 @@ class WebCrawlerService:
         # Initialize Crawl4AI crawler lazily (on first use)
         # This avoids initialization errors if crawler is never used
         self.crawler = None
-        if CRAWL4AI_AVAILABLE and BrowserConfig:
-            self._browser_config = BrowserConfig(
-                headless=True,
-                user_agent=self.user_agent,
-                extra_args=["--no-sandbox", "--disable-dev-shm-usage"]
-            )
-        else:
-            self._browser_config = None
+        self._browser_config = None  # Will be set when crawler is initialized
+        self._crawler_type = None  # Track which API version we're using
     
     def _is_allowed_domain(self, url: str) -> bool:
         """
@@ -118,14 +99,39 @@ class WebCrawlerService:
         if not CRAWL4AI_AVAILABLE:
             raise ImportError("Crawl4AI is not available. Please install it: pip install crawl4ai")
         if self.crawler is None:
-            if Crawler:
-                # Old API
-                self.crawler = Crawler(browser_config=self._browser_config)
-            elif AsyncWebCrawler:
-                # New API
+            # Try to import and use crawl4ai dynamically - try multiple import patterns
+            crawler_initialized = False
+            
+            # Try new API first (AsyncWebCrawler)
+            try:
+                from crawl4ai import AsyncWebCrawler
                 self.crawler = AsyncWebCrawler()
-            else:
-                raise ImportError("Could not import Crawler from crawl4ai")
+                self._crawler_type = "new"
+                crawler_initialized = True
+            except (ImportError, AttributeError):
+                try:
+                    from crawl4ai.async_webcrawler import AsyncWebCrawler
+                    self.crawler = AsyncWebCrawler()
+                    self._crawler_type = "new"
+                    crawler_initialized = True
+                except (ImportError, AttributeError):
+                    pass
+            
+            # Try old API if new didn't work
+            if not crawler_initialized:
+                try:
+                    from crawl4ai import Crawler, BrowserConfig
+                    browser_config = BrowserConfig(
+                        headless=True,
+                        user_agent=self.user_agent,
+                        extra_args=["--no-sandbox", "--disable-dev-shm-usage"]
+                    )
+                    self.crawler = Crawler(browser_config=browser_config)
+                    self._crawler_type = "old"
+                    crawler_initialized = True
+                except (ImportError, AttributeError, Exception) as e:
+                    raise ImportError(f"Could not import or initialize Crawler from crawl4ai: {e}. The package may not be properly installed or the API has changed.")
+        
         return self.crawler
     
     async def extract_content(self, url: str) -> Optional[Dict[str, Any]]:
@@ -148,23 +154,53 @@ class WebCrawlerService:
             # Get or initialize crawler
             crawler = self._get_crawler()
             
-            # Crawl the page
-            result = await crawler.arun(url=url)
+            # Crawl the page - try new API first, fallback to old API
+            try:
+                # Try new API (AsyncWebCrawler)
+                result = await crawler.arun(url=url)
+                
+                # Check if result is dict (new API) or object (old API)
+                if isinstance(result, dict):
+                    # New API - result is a dict
+                    success = result.get('success', True)
+                    if not success:
+                        error_msg = result.get('error_message', 'Unknown error')
+                        logger.warning(f"Failed to crawl {url}: {error_msg}")
+                        return None
+                    
+                    title = result.get('metadata', {}).get('title', '') if result.get('metadata') else ''
+                    text_content = result.get('markdown', '') or result.get('cleaned_html', '') or result.get('html', '')
+                else:
+                    # Old API - result is an object
+                    if not hasattr(result, 'success') or not result.success:
+                        error_msg = getattr(result, 'error_message', 'Unknown error')
+                        logger.warning(f"Failed to crawl {url}: {error_msg}")
+                        return None
+                    
+                    title = result.metadata.get('title', '') if result.metadata else ''
+                    text_content = result.markdown or result.cleaned_html or result.html or ''
+                    
+            except AttributeError:
+                # Fallback: try different method names
+                result = await crawler.crawl(url=url) if hasattr(crawler, 'crawl') else await crawler.arun(url=url)
+                if isinstance(result, dict):
+                    success = result.get('success', True)
+                    if not success:
+                        return None
+                    title = result.get('metadata', {}).get('title', '') if result.get('metadata') else ''
+                    text_content = result.get('markdown', '') or result.get('cleaned_html', '') or result.get('html', '')
+                else:
+                    if not result.success:
+                        return None
+                    title = result.metadata.get('title', '') if result.metadata else ''
+                    text_content = result.markdown or result.cleaned_html or result.html or ''
             
-            if not result.success:
-                logger.warning(f"Failed to crawl {url}: {result.error_message}")
-                return None
-            
-            # Extract content
-            title = result.metadata.get('title', '') if result.metadata else ''
-            if not title and result.markdown:
+            # Extract title if not found
+            if not title and text_content:
                 # Try to extract title from markdown
-                first_line = result.markdown.split('\n')[0] if result.markdown else ''
+                first_line = text_content.split('\n')[0] if text_content else ''
                 if first_line.startswith('# '):
                     title = first_line[2:].strip()
-            
-            # Get text content (prefer markdown, fallback to html)
-            text_content = result.markdown or result.cleaned_html or result.html or ''
             
             # Clean up text (remove excessive whitespace)
             text_content = re.sub(r'\s+', ' ', text_content).strip()
@@ -173,14 +209,27 @@ class WebCrawlerService:
             if len(text_content) > 5000:
                 text_content = text_content[:5000] + "..."
             
+            # Get metadata safely
+            html_length = 0
+            markdown_length = 0
+            status_code = None
+            if isinstance(result, dict):
+                html_length = len(result.get('html', '')) if result.get('html') else 0
+                markdown_length = len(result.get('markdown', '')) if result.get('markdown') else 0
+                status_code = result.get('status_code', None)
+            else:
+                html_length = len(result.html) if hasattr(result, 'html') and result.html else 0
+                markdown_length = len(result.markdown) if hasattr(result, 'markdown') and result.markdown else 0
+                status_code = getattr(result, 'status_code', None)
+            
             return {
                 'url': url,
                 'title': title or 'Untitled',
                 'text': text_content,
                 'metadata': {
-                    'html_length': len(result.html) if result.html else 0,
-                    'markdown_length': len(result.markdown) if result.markdown else 0,
-                    'status_code': result.status_code if hasattr(result, 'status_code') else None,
+                    'html_length': html_length,
+                    'markdown_length': markdown_length,
+                    'status_code': status_code,
                 },
                 'extracted_at': datetime.now().isoformat(),
                 'domain': self._extract_domain(url)
@@ -248,7 +297,17 @@ class WebCrawlerService:
         """Clean up crawler resources"""
         try:
             if self.crawler is not None:
-                await self.crawler.close()
+                # Try to close the crawler gracefully
+                if hasattr(self.crawler, 'close'):
+                    try:
+                        await self.crawler.close()
+                    except RuntimeError as e:
+                        # Ignore event loop errors during cleanup
+                        logger.debug(f"Event loop error during crawler close (this is usually OK): {str(e)}")
+                elif hasattr(self.crawler, 'cleanup'):
+                    await self.crawler.cleanup()
+                self.crawler = None
         except Exception as e:
-            logger.error(f"Error closing crawler: {str(e)}")
+            # Log but don't raise - cleanup errors shouldn't break the flow
+            logger.debug(f"Error closing crawler (non-critical): {str(e)}")
 
