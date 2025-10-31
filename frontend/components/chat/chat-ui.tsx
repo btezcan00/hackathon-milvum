@@ -4,11 +4,18 @@ import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { FileUpload } from '@/components/file-upload';
 import { Send, Loader2 } from 'lucide-react';
 import { useRef, useEffect, useState } from 'react';
 
-export function ChatUI() {
+interface ChatUIProps {
+  onFileSelected?: (file: File | null) => void;
+}
+
+export function ChatUI({ onFileSelected }: ChatUIProps) {
   const [input, setInput] = useState('');
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [uploading, setUploading] = useState(false);
   const { messages, sendMessage, status } = useChat({
     transport: new DefaultChatTransport({
       api: '/api/chat',
@@ -22,6 +29,50 @@ export function ChatUI() {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages]);
+
+  const handleFilesSelected = async (files: File[]) => {
+    setSelectedFiles(files);
+    
+    // Upload files to backend
+    if (files.length > 0) {
+      setUploading(true);
+      try {
+        const uploadPromises = files.map(async (file) => {
+          const formData = new FormData();
+          formData.append('file', file);
+          
+          const response = await fetch('/api/upload', {
+            method: 'POST',
+            body: formData,
+          });
+          
+          if (!response.ok) {
+            throw new Error(`Failed to upload ${file.name}`);
+          }
+          
+          return response.json();
+        });
+
+        await Promise.all(uploadPromises);
+        
+        // If first file is PDF, select it for viewing
+        const firstPdf = files.find(f => f.type === 'application/pdf');
+        if (firstPdf && onFileSelected) {
+          onFileSelected(firstPdf);
+        }
+        
+        // Note: We don't auto-send a message here to avoid interfering with chat flow
+      } catch (error) {
+        console.error('Upload error:', error);
+        alert(`Er is een fout opgetreden bij het uploaden van de bestanden. Probeer het opnieuw.`);
+      } finally {
+        setUploading(false);
+        setSelectedFiles([]);
+      }
+    } else if (onFileSelected) {
+      onFileSelected(null);
+    }
+  };
 
   return (
     <div className="flex flex-col h-full bg-white border border-gray-300">
@@ -100,11 +151,16 @@ export function ChatUI() {
         </div>
       </div>
 
+      {/* File Upload Section */}
+      <div className="px-5 py-4 border-t-2 border-gray-300 bg-gray-50">
+        <FileUpload onFilesSelected={handleFilesSelected} maxFiles={10} />
+      </div>
+
       {/* Input Area - Government Style */}
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          if (input.trim() && status !== 'streaming') {
+          if (input.trim() && status !== 'streaming' && !uploading) {
             sendMessage({ text: input });
             setInput('');
           }
@@ -126,22 +182,27 @@ export function ChatUI() {
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
-                  if (input.trim() && status !== 'streaming') {
+                  if (input.trim() && status !== 'streaming' && !uploading) {
                     sendMessage({ text: input });
                     setInput('');
                   }
                 }
               }}
-              disabled={status === 'streaming'}
+              disabled={status === 'streaming' || uploading}
             />
           </div>
           <Button
             type="submit"
-            disabled={status === 'streaming' || !input.trim()}
+            disabled={status === 'streaming' || !input.trim() || uploading}
             className="h-[70px] px-8 bg-[#154274] hover:bg-[#0f3054] text-white border-0 font-bold disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             style={{ fontFamily: 'Verdana, sans-serif' }}
           >
-            {status === 'streaming' ? (
+            {uploading ? (
+              <>
+                <Loader2 className="h-5 w-5 animate-spin mr-2" />
+                Uploaden...
+              </>
+            ) : status === 'streaming' ? (
               <Loader2 className="h-5 w-5 animate-spin" />
             ) : (
               <>
