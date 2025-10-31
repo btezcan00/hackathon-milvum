@@ -2,9 +2,10 @@
 
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { FileUpload } from '@/components/file-upload';
-import { Send, Loader2 } from 'lucide-react';
-import { useRef, useEffect, useState } from 'react';
+import { Send, Loader2, Plus, Search } from 'lucide-react';
+import { useRef, useEffect, useState, DragEvent } from 'react';
+import { CitationList, type Citation } from '@/components/citations/citation-list';
+import { createHighlightUrl } from '@/components/citations/citation-highlighter';
 
 interface ChatUIProps {
   onFileSelected?: (file: File | null) => void;
@@ -14,6 +15,7 @@ interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  citations?: Citation[];
 }
 
 export function ChatUI({ onFileSelected }: ChatUIProps) {
@@ -22,8 +24,12 @@ export function ChatUI({ onFileSelected }: ChatUIProps) {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const [streaming, setStreaming] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [researchMode, setResearchMode] = useState(false);
+  const [researchUrls, setResearchUrls] = useState<string>('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const messageIdCounter = useRef<number>(0);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -31,14 +37,34 @@ export function ChatUI({ onFileSelected }: ChatUIProps) {
     }
   }, [messages]);
 
+  const validateFiles = (files: File[]): File[] => {
+    return files.filter(file => {
+      const ext = file.name.split('.').pop()?.toLowerCase();
+      const allowedTypes = ['pdf', 'txt', 'doc', 'docx', 'md'];
+      const isValidExt = allowedTypes.includes(ext || '');
+      const isValidMime = file.type === 'application/pdf' || 
+                         file.type.startsWith('text/') ||
+                         file.type.includes('document') ||
+                         file.type.includes('word');
+      return isValidExt || isValidMime;
+    });
+  };
+
   const handleFilesSelected = async (files: File[]) => {
-    setSelectedFiles(files);
+    const validFiles = validateFiles(files);
+    
+    if (validFiles.length === 0 && files.length > 0) {
+      alert('Alleen PDF, TXT, DOC, DOCX en MD bestanden zijn toegestaan.');
+      return;
+    }
+
+    setSelectedFiles(validFiles);
 
     // Upload files to backend
-    if (files.length > 0) {
+    if (validFiles.length > 0) {
       setUploading(true);
       try {
-        const uploadPromises = files.map(async (file) => {
+        const uploadPromises = validFiles.map(async (file) => {
           const formData = new FormData();
           formData.append('file', file);
 
@@ -57,7 +83,7 @@ export function ChatUI({ onFileSelected }: ChatUIProps) {
         await Promise.all(uploadPromises);
 
         // If first file is PDF, select it for viewing
-        const firstPdf = files.find(f => f.type === 'application/pdf');
+        const firstPdf = validFiles.find(f => f.type === 'application/pdf');
         if (firstPdf && onFileSelected) {
           onFileSelected(firstPdf);
         }
@@ -70,6 +96,40 @@ export function ChatUI({ onFileSelected }: ChatUIProps) {
       }
     } else if (onFileSelected) {
       onFileSelected(null);
+    }
+  };
+
+  const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(true);
+  };
+
+  const handleDragLeave = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+  };
+
+  const handleDrop = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+    
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length > 0) {
+      handleFilesSelected(files);
+    }
+  };
+
+  const openFileDialog = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      const files = Array.from(e.target.files);
+      handleFilesSelected(files);
     }
   };
 
@@ -87,6 +147,42 @@ export function ChatUI({ onFileSelected }: ChatUIProps) {
     setStreaming(true);
 
     try {
+      // If research mode is enabled, use research endpoint
+      if (researchMode && researchUrls.trim()) {
+        const urls = researchUrls.split('\n').filter(url => url.trim()).map(url => url.trim());
+        
+        const response = await fetch('/api/research', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            query: content,
+            urls: urls,
+            max_results: 5,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to get research response');
+        }
+
+        const data = await response.json();
+
+        messageIdCounter.current += 1;
+        const assistantMessage: Message = {
+          id: `assistant-${messageIdCounter.current}`,
+          role: 'assistant',
+          content: data.answer || 'Geen antwoord ontvangen.',
+          citations: data.citations || [],
+        };
+
+        setMessages(prev => [...prev, assistantMessage]);
+        setStreaming(false);
+        return;
+      }
+
+      // Regular chat mode
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: {
@@ -214,8 +310,24 @@ export function ChatUI({ onFileSelected }: ChatUIProps) {
         <p className="text-sm text-white/90 mt-1">Vraag informatie over uw documenten</p>
       </div>
 
-      {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto px-4 py-6" ref={scrollRef}>
+      {/* Messages Area - with drag and drop */}
+      <div 
+        className="flex-1 overflow-y-auto px-4 py-6 relative"
+        ref={scrollRef}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
+        {/* Drag overlay - shown when dragging files */}
+        {isDragOver && (
+          <div className="absolute inset-0 bg-[#154274]/10 border-4 border-dashed border-[#154274] flex items-center justify-center z-50 pointer-events-none">
+            <div className="bg-white px-6 py-4 rounded-lg shadow-lg border-2 border-[#154274]">
+              <p className="text-lg font-bold text-[#154274]" style={{ fontFamily: 'Verdana, sans-serif' }}>
+                Laat bestanden hier los om te uploaden
+              </p>
+            </div>
+          </div>
+        )}
         <div className="space-y-6">
           {messages.length === 0 && (
             <div className="flex flex-col items-center justify-center py-16 text-center">
@@ -254,6 +366,15 @@ export function ChatUI({ onFileSelected }: ChatUIProps) {
                 <p className="text-sm leading-relaxed whitespace-pre-wrap" style={{ fontFamily: 'Verdana, sans-serif' }}>
                   {message.content}
                 </p>
+                {message.role === 'assistant' && message.citations && message.citations.length > 0 && (
+                  <CitationList
+                    citations={message.citations}
+                    onCitationClick={(citation) => {
+                      const url = createHighlightUrl(citation);
+                      window.open(url, '_blank');
+                    }}
+                  />
+                )}
               </div>
 
               {message.role === 'user' && (
@@ -280,11 +401,6 @@ export function ChatUI({ onFileSelected }: ChatUIProps) {
         </div>
       </div>
 
-      {/* File Upload Section */}
-      <div className="px-5 py-4 border-t-2 border-gray-300 bg-gray-50">
-        <FileUpload onFilesSelected={handleFilesSelected} maxFiles={10} />
-      </div>
-
       {/* Input Area - Government Style */}
       <form
         onSubmit={(e) => {
@@ -296,7 +412,58 @@ export function ChatUI({ onFileSelected }: ChatUIProps) {
         }}
         className="p-5 border-t-2 border-gray-300 bg-white"
       >
+        {/* Hidden file input */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept=".pdf,.txt,.doc,.docx,.md"
+          onChange={handleFileSelect}
+          className="hidden"
+        />
+
+        {/* Research Mode Toggle */}
+        <div className="mb-3 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setResearchMode(!researchMode)}
+            disabled={streaming || uploading}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded border-2 transition-colors ${
+              researchMode
+                ? 'bg-[#154274] text-white border-[#154274]'
+                : 'bg-white text-[#154274] border-[#154274] hover:bg-[#154274]/10'
+            } disabled:opacity-50 disabled:cursor-not-allowed`}
+            style={{ fontFamily: 'Verdana, sans-serif', fontSize: '12px' }}
+          >
+            <Search className="h-3 w-3" />
+            <span>Diep Onderzoek</span>
+          </button>
+          {researchMode && (
+            <div className="flex-1">
+              <Textarea
+                placeholder="Voer URLs in (één per regel)"
+                value={researchUrls}
+                onChange={(e) => setResearchUrls(e.target.value)}
+                disabled={streaming || uploading}
+                className="min-h-[40px] max-h-[80px] resize-none px-3 py-1.5 border-2 border-gray-400 focus:border-[#154274] focus:ring-2 focus:ring-[#154274] bg-white text-black placeholder:text-gray-500 text-xs"
+                style={{ fontFamily: 'Verdana, sans-serif' }}
+              />
+            </div>
+          )}
+        </div>
+
         <div className="flex gap-3 items-end">
+          {/* Plus button on the left - centered with textarea */}
+          <button
+            type="button"
+            onClick={openFileDialog}
+            disabled={streaming || uploading}
+            className="w-8 h-8 bg-[#154274] hover:bg-[#0f3054] text-white flex items-center justify-center rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
+            aria-label="Bestand toevoegen"
+          >
+            <Plus className="h-4 w-4" />
+          </button>
+
           <div className="flex-1">
             <label htmlFor="chat-input" className="block text-sm font-bold text-black mb-2">
               Uw vraag:
@@ -306,7 +473,7 @@ export function ChatUI({ onFileSelected }: ChatUIProps) {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="Typ uw vraag hier..."
-              className="min-h-[70px] max-h-[150px] resize-none border-2 border-gray-400 focus:border-[#154274] focus:ring-2 focus:ring-[#154274] bg-white text-black placeholder:text-gray-500"
+              className="min-h-[50px] max-h-[120px] resize-none border-2 border-gray-400 focus:border-[#154274] focus:ring-2 focus:ring-[#154274] bg-white text-black placeholder:text-gray-500"
               style={{ fontFamily: 'Verdana, sans-serif', fontSize: '14px' }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
@@ -323,7 +490,7 @@ export function ChatUI({ onFileSelected }: ChatUIProps) {
           <Button
             type="submit"
             disabled={streaming || !input.trim() || uploading}
-            className="h-[70px] px-8 bg-[#154274] hover:bg-[#0f3054] text-white border-0 font-bold disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="h-[50px] px-6 bg-[#154274] hover:bg-[#0f3054] text-white border-0 font-bold disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
             style={{ fontFamily: 'Verdana, sans-serif' }}
           >
             {uploading ? (
