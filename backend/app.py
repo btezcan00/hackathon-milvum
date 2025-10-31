@@ -7,14 +7,6 @@ import asyncio
 from services.document_processor import DocumentProcessor
 from services.rag_service import RAGService
 from services.llm_service import EmbeddingService, ChatService
-try:
-    from services.web_crawler_service import WebCrawlerService
-    WEB_CRAWLER_AVAILABLE = True
-except ImportError as e:
-    logger.warning(f"WebCrawlerService not available: {e}")
-    WebCrawlerService = None
-    WEB_CRAWLER_AVAILABLE = False
-
 from services.citation_service import CitationService
 import logging
 from datetime import datetime
@@ -23,6 +15,15 @@ import uuid
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Import web crawler service - make it optional
+try:
+    from services.web_crawler_service import WebCrawlerService
+    WEB_CRAWLER_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"WebCrawlerService not available: {e}")
+    WebCrawlerService = None
+    WEB_CRAWLER_AVAILABLE = False
 
 app = Flask(__name__)
 CORS(app)

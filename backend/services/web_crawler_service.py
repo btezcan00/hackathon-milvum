@@ -26,7 +26,6 @@ except ImportError:
         BrowserConfig = BrowserConfig
     except ImportError:
         # Crawl4AI not available or different API
-        logger.warning("Crawl4AI not available - web crawling features will be disabled")
         CRAWL4AI_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
