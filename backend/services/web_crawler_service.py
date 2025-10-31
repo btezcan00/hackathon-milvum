@@ -5,7 +5,29 @@ import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from urllib.parse import urlparse
-from crawl4ai import Crawler, BrowserConfig
+# Try to import Crawl4AI - make it optional to allow backend to start
+# Crawl4AI API may vary by version
+CRAWL4AI_AVAILABLE = False
+Crawler = None
+BrowserConfig = None
+AsyncWebCrawler = None
+
+try:
+    # Try new API first (v0.4+)
+    from crawl4ai import AsyncWebCrawler
+    CRAWL4AI_AVAILABLE = True
+    AsyncWebCrawler = AsyncWebCrawler
+except ImportError:
+    try:
+        # Try old API
+        from crawl4ai import Crawler, BrowserConfig
+        CRAWL4AI_AVAILABLE = True
+        Crawler = Crawler
+        BrowserConfig = BrowserConfig
+    except ImportError:
+        # Crawl4AI not available or different API
+        logger.warning("Crawl4AI not available - web crawling features will be disabled")
+        CRAWL4AI_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -50,13 +72,17 @@ class WebCrawlerService:
         self.allowed_domains = allowed_domains or self.DEFAULT_GOV_DOMAINS
         self.user_agent = user_agent or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         
-        # Initialize Crawl4AI crawler
-        browser_config = BrowserConfig(
-            headless=True,
-            user_agent=self.user_agent,
-            extra_args=["--no-sandbox", "--disable-dev-shm-usage"]
-        )
-        self.crawler = Crawler(browser_config=browser_config)
+        # Initialize Crawl4AI crawler lazily (on first use)
+        # This avoids initialization errors if crawler is never used
+        self.crawler = None
+        if CRAWL4AI_AVAILABLE and BrowserConfig:
+            self._browser_config = BrowserConfig(
+                headless=True,
+                user_agent=self.user_agent,
+                extra_args=["--no-sandbox", "--disable-dev-shm-usage"]
+            )
+        else:
+            self._browser_config = None
     
     def _is_allowed_domain(self, url: str) -> bool:
         """
@@ -88,6 +114,21 @@ class WebCrawlerService:
         except Exception:
             return ""
     
+    def _get_crawler(self):
+        """Get or initialize the crawler instance"""
+        if not CRAWL4AI_AVAILABLE:
+            raise ImportError("Crawl4AI is not available. Please install it: pip install crawl4ai")
+        if self.crawler is None:
+            if Crawler:
+                # Old API
+                self.crawler = Crawler(browser_config=self._browser_config)
+            elif AsyncWebCrawler:
+                # New API
+                self.crawler = AsyncWebCrawler()
+            else:
+                raise ImportError("Could not import Crawler from crawl4ai")
+        return self.crawler
+    
     async def extract_content(self, url: str) -> Optional[Dict[str, Any]]:
         """
         Extract content from a single URL
@@ -105,8 +146,11 @@ class WebCrawlerService:
         try:
             logger.info(f"Crawling URL: {url}")
             
+            # Get or initialize crawler
+            crawler = self._get_crawler()
+            
             # Crawl the page
-            result = await self.crawler.arun(url=url)
+            result = await crawler.arun(url=url)
             
             if not result.success:
                 logger.warning(f"Failed to crawl {url}: {result.error_message}")
@@ -204,7 +248,8 @@ class WebCrawlerService:
     async def close(self):
         """Clean up crawler resources"""
         try:
-            await self.crawler.close()
+            if self.crawler is not None:
+                await self.crawler.close()
         except Exception as e:
             logger.error(f"Error closing crawler: {str(e)}")
 

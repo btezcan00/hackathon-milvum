@@ -164,7 +164,8 @@ export function ChatUI({ onFileSelected }: ChatUIProps) {
         });
 
         if (!response.ok) {
-          throw new Error('Failed to get research response');
+          const errorData = await response.json().catch(() => ({ error: response.statusText }));
+          throw new Error(errorData.error || `Failed to get research response (${response.status})`);
         }
 
         const data = await response.json();
@@ -294,10 +295,20 @@ export function ChatUI({ onFileSelected }: ChatUIProps) {
           return newMessages;
         });
       }
-    } catch (error) {
-      console.error('Chat error:', error);
-      alert('Er is een fout opgetreden. Probeer het opnieuw.');
-    } finally {
+      } catch (error) {
+        console.error('Chat error:', error);
+        const errorMessage = error instanceof Error ? error.message : 'Er is een fout opgetreden. Probeer het opnieuw.';
+        alert(errorMessage);
+        
+        // Show error message in chat
+        messageIdCounter.current += 1;
+        const errorMsg: Message = {
+          id: `error-${messageIdCounter.current}`,
+          role: 'assistant',
+          content: `⚠️ Fout: ${errorMessage}`,
+        };
+        setMessages(prev => [...prev, errorMsg]);
+      } finally {
       setStreaming(false);
     }
   };

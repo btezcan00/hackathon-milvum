@@ -7,7 +7,14 @@ import asyncio
 from services.document_processor import DocumentProcessor
 from services.rag_service import RAGService
 from services.llm_service import EmbeddingService, ChatService
-from services.web_crawler_service import WebCrawlerService
+try:
+    from services.web_crawler_service import WebCrawlerService
+    WEB_CRAWLER_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"WebCrawlerService not available: {e}")
+    WebCrawlerService = None
+    WEB_CRAWLER_AVAILABLE = False
+
 from services.citation_service import CitationService
 import logging
 from datetime import datetime
@@ -38,6 +45,8 @@ citation_service = CitationService(embedding_service)
 # Web crawler will be initialized per request (to avoid keeping browser open)
 def get_web_crawler():
     """Get a new web crawler instance"""
+    if not WEB_CRAWLER_AVAILABLE or WebCrawlerService is None:
+        raise ImportError("WebCrawlerService is not available. Crawl4AI may not be properly installed.")
     max_pages = int(os.getenv('CRAWL_MAX_PAGES', '10'))
     timeout = int(os.getenv('CRAWL_TIMEOUT', '30'))
     return WebCrawlerService(max_pages=max_pages, timeout=timeout)

@@ -1,6 +1,6 @@
 flask
 flask-cors
-pinecone-client
+pinecone
 requests
 python-dotenv
 werkzeug
