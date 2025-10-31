@@ -138,17 +138,34 @@ def chat():
         
         def generate_stream():
             try:
+                has_content = False
                 for chunk in chat_service.chat_stream(llm_messages):
                     if chunk:
+                        has_content = True
                         # Format as SSE (Server-Sent Events)
                         yield f"data: {json.dumps({'type': 'text', 'text': chunk})}\n\n"
                 
-                # Send completion signal
-                yield f"data: [DONE]\n\n"
+                # If no content was received, it might be an error
+                if not has_content:
+                    error_msg = "Geen antwoord ontvangen van de LLM service. Controleer uw API-sleutels."
+                    yield f"data: {json.dumps({'type': 'error', 'error': error_msg})}\n\n"
+                else:
+                    # Send completion signal
+                    yield f"data: [DONE]\n\n"
                 
             except Exception as e:
                 logger.error(f"Error in streaming: {str(e)}")
-                yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
+                # Send user-friendly error message
+                error_message = str(e)
+                if "401" in error_message or "Unauthorized" in error_message:
+                    error_message = "Authenticatiefout: Controleer of uw GROQ_API_KEY correct is ingesteld in de .env file."
+                elif "404" in error_message:
+                    error_message = "Model niet gevonden. Controleer of het model naam correct is."
+                else:
+                    error_message = f"Fout bij het genereren van antwoord: {str(e)}"
+                
+                yield f"data: {json.dumps({'type': 'error', 'error': error_message})}\n\n"
+                yield f"data: [DONE]\n\n"
         
         return Response(
             generate_stream(),

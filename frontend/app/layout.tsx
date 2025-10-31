@@ -12,7 +12,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="nl">
+    <html lang="nl" suppressHydrationWarning>
       <body className="antialiased" style={{ fontFamily: 'Verdana, sans-serif' }}>
         {children}
       </body>

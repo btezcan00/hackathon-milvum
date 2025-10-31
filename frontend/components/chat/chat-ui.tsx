@@ -23,6 +23,7 @@ export function ChatUI({ onFileSelected }: ChatUIProps) {
   const [uploading, setUploading] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const messageIdCounter = useRef<number>(0);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -75,8 +76,9 @@ export function ChatUI({ onFileSelected }: ChatUIProps) {
   const sendMessage = async (content: string) => {
     if (!content.trim() || streaming) return;
 
+    messageIdCounter.current += 1;
     const userMessage: Message = {
-      id: Date.now().toString(),
+      id: `user-${messageIdCounter.current}`,
       role: 'user',
       content,
     };
@@ -107,13 +109,17 @@ export function ChatUI({ onFileSelected }: ChatUIProps) {
         throw new Error('No response body');
       }
 
+      messageIdCounter.current += 1;
       let assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
+        id: `assistant-${messageIdCounter.current}`,
         role: 'assistant',
         content: '',
       };
 
       setMessages(prev => [...prev, assistantMessage]);
+
+      let hasReceivedContent = false;
+      let errorOccurred = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -125,13 +131,50 @@ export function ChatUI({ onFileSelected }: ChatUIProps) {
         for (const line of lines) {
           if (line.startsWith('data: ')) {
             const data = line.slice(6);
-            if (data === '[DONE]') continue;
+            if (data === '[DONE]') {
+              // Stream is complete
+              // If no content was received, show an error
+              if (!hasReceivedContent && !errorOccurred) {
+                assistantMessage.content = '⚠️ Geen antwoord ontvangen. Controleer uw verbinding of probeer het opnieuw.';
+                setMessages(prev => {
+                  const newMessages = [...prev];
+                  newMessages[newMessages.length - 1] = { ...assistantMessage };
+                  return newMessages;
+                });
+              }
+              continue;
+            }
 
             try {
               const json = JSON.parse(data);
-              const content = json.choices?.[0]?.delta?.content;
-
-              if (content) {
+              
+              // Handle error messages
+              if (json.type === 'error') {
+                errorOccurred = true;
+                assistantMessage.content = `⚠️ ${json.error || 'Er is een fout opgetreden'}`;
+                setMessages(prev => {
+                  const newMessages = [...prev];
+                  newMessages[newMessages.length - 1] = { ...assistantMessage };
+                  return newMessages;
+                });
+                break; // Stop reading stream on error
+              }
+              
+              // Handle text content
+              if (json.type === 'text' && json.text) {
+                hasReceivedContent = true;
+                assistantMessage.content += json.text;
+                setMessages(prev => {
+                  const newMessages = [...prev];
+                  newMessages[newMessages.length - 1] = { ...assistantMessage };
+                  return newMessages;
+                });
+              }
+              
+              // Fallback: support Groq format for compatibility
+              if (!json.type && json.choices?.[0]?.delta?.content) {
+                hasReceivedContent = true;
+                const content = json.choices[0].delta.content;
                 assistantMessage.content += content;
                 setMessages(prev => {
                   const newMessages = [...prev];
@@ -140,10 +183,20 @@ export function ChatUI({ onFileSelected }: ChatUIProps) {
                 });
               }
             } catch (e) {
-              console.error('Error parsing SSE:', e);
+              console.error('Error parsing SSE:', e, 'Data:', data);
             }
           }
         }
+      }
+
+      // Final check: if we still have no content and no error, show a message
+      if (!hasReceivedContent && !errorOccurred && assistantMessage.content === '') {
+        assistantMessage.content = '⚠️ Geen antwoord ontvangen van de server.';
+        setMessages(prev => {
+          const newMessages = [...prev];
+          newMessages[newMessages.length - 1] = { ...assistantMessage };
+          return newMessages;
+        });
       }
     } catch (error) {
       console.error('Chat error:', error);
