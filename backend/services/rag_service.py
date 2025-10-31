@@ -1,9 +1,11 @@
+import json
+import os
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue
 from typing import List, Dict, Any
 import uuid
 import logging
-
+import time
 logger = logging.getLogger(__name__)
 
 class RAGService:
@@ -19,16 +21,33 @@ class RAGService:
             qdrant_port: Qdrant server port
         """
         self.embedding_service = embedding_service
+        self.qdrant_host = qdrant_host
+        self.qdrant_port = qdrant_port
         self.qdrant_client = QdrantClient(host=qdrant_host, port=qdrant_port)
-        self.collection_name = "rag_documents"
-        # Get dimension lazily - don't load model until needed
-        try:
-            self.vector_size = embedding_service.get_dimension()
-        except Exception as e:
-            logger.warning(f"Could not get embedding dimension during init: {str(e)}")
-            logger.info("Will retry when model is actually used")
-            self.vector_size = 384  # Default for all-MiniLM-L6-v2
+        self.collection_name = "all_documents"
+        self.vector_size = embedding_service.get_dimension()
+        self._connect_with_retry()
+        self.initialize()
+        self._migrate_sample_data()  # Add migration here
         
+    def _connect_with_retry(self, max_retries: int = 10, delay: int = 2):
+        """Connect to Qdrant with retry logic"""
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"Attempting to connect to Qdrant at {self.qdrant_host}:{self.qdrant_port} (attempt {attempt + 1}/{max_retries})")
+                self.qdrant_client = QdrantClient(host=self.qdrant_host, port=self.qdrant_port, timeout=10)
+                # Test connection
+                self.qdrant_client.get_collections()
+                logger.info("Successfully connected to Qdrant")
+                return
+            except Exception as e:
+                logger.warning(f"Connection attempt {attempt + 1} failed: {str(e)}")
+                if attempt < max_retries - 1:
+                    time.sleep(delay)
+                else:
+                    logger.error("Failed to connect to Qdrant after all retries")
+                    raise
+    
     def initialize(self):
         """Initialize Qdrant collection"""
         try:
@@ -42,6 +61,51 @@ class RAGService:
             logger.info(f"Collection '{self.collection_name}' created with dimension {self.vector_size}")
         except Exception as e:
             logger.info(f"Collection might already exist: {e}")
+    
+    def _migrate_sample_data(self):
+        """Migrate sample data from JSON if available"""
+        try:
+            # Path to sample data
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            json_path = os.path.join(script_dir, "..", "migration", "sample_data.json")
+            
+            if not os.path.exists(json_path):
+                logger.info("No sample data file found, skipping migration")
+                return
+            
+            logger.info(f"Loading sample data from {json_path}")
+            with open(json_path, "r") as f:
+                data = json.load(f)
+            
+            # Check if collection already has data
+            collection_info = self.qdrant_client.get_collection(self.collection_name)
+            if collection_info.points_count > 0:
+                logger.info(f"Collection already has {collection_info.points_count} points, skipping migration")
+                return
+            
+            # Prepare points
+            points = []
+            for item in data:
+                doc = item.copy()
+                vector = doc.pop("embedding")  # Changed from "vector" to "embedding"
+                
+                point = PointStruct(
+                    id=str(uuid.uuid4()),
+                    vector=vector,
+                    payload=doc
+                )
+                points.append(point)
+            
+            # Upsert to Qdrant
+            self.qdrant_client.upsert(
+                collection_name=self.collection_name,
+                points=points
+            )
+            
+            logger.info(f"Successfully migrated {len(points)} documents from sample data")
+            
+        except Exception as e:
+            logger.warning(f"Migration failed (this is OK if no sample data): {str(e)}")
     
     def index_document(self, chunks: List[str], metadata: Dict[str, Any]) -> str:
         """

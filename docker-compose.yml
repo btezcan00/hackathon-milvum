@@ -11,9 +11,34 @@ services:
     environment:
       - QDRANT__SERVICE__GRPC_PORT=6334
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "timeout 1 bash -c ': < /dev/tcp/localhost/6333' || exit 1"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-      start_period: 10s
+    networks:
+      - rag_network
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: rag_backend
+    ports:
+      - "5050:5000"
+    env_file:
+      - .env
+    environment:
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - PYTHONUNBUFFERED=1
+    networks:
+      - rag_network
+    restart: unless-stopped
+    command: >
+      sh -c "
+        echo 'Waiting for Qdrant to be ready...' &&
+        python app.py
+      "
+    depends_on:
+      - qdrant
+
+networks:
+  rag_network:
+    driver: bridge

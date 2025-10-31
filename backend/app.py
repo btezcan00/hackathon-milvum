@@ -2,9 +2,9 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 import os
-from services.document_processor import DocumentProcessor
+# from services.document_processor import DocumentProcessor
 from services.rag_service import RAGService
-from services.embedding_service import EmbeddingService
+from services.llm_service import EmbeddingService, ChatService
 import logging
 
 # Configure logging
@@ -24,19 +24,9 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
 # Initialize services
 embedding_service = EmbeddingService()
-doc_processor = DocumentProcessor()
-qdrant_host = os.getenv('QDRANT_HOST', 'localhost')
-qdrant_port = int(os.getenv('QDRANT_PORT', '6333'))
-rag_service = RAGService(embedding_service, qdrant_host=qdrant_host, qdrant_port=qdrant_port)
-
-# Initialize Qdrant collection on app startup
-# Note: Embedding model loads lazily on first use
-try:
-    rag_service.initialize()
-    logger.info("RAG service initialized successfully")
-except Exception as e:
-    logger.error(f"Failed to initialize RAG service: {str(e)}")
-    logger.info("App will continue but RAG features may not work until services are ready")
+chat_service = ChatService()
+# doc_processor = DocumentProcessor()
+rag_service = RAGService(embedding_service)
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -46,59 +36,59 @@ def health_check():
     """Health check endpoint"""
     return jsonify({'status': 'healthy', 'service': 'RAG Backend'}), 200
 
-@app.route('/api/upload', methods=['POST'])
-def upload_file():
-    """Upload and process document"""
-    try:
-        if 'file' not in request.files:
-            return jsonify({'error': 'No file part'}), 400
+# @app.route('/api/upload', methods=['POST'])
+# def upload_file():
+#     """Upload and process document"""
+#     try:
+#         if 'file' not in request.files:
+#             return jsonify({'error': 'No file part'}), 400
         
-        file = request.files['file']
-        if file.filename == '':
-            return jsonify({'error': 'No selected file'}), 400
+#         file = request.files['file']
+#         if file.filename == '':
+#             return jsonify({'error': 'No selected file'}), 400
         
-        if file and allowed_file(file.filename):
-            filename = secure_filename(file.filename)
-            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            file.save(filepath)
+#         if file and allowed_file(file.filename):
+#             filename = secure_filename(file.filename)
+#             filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+#             file.save(filepath)
             
-            logger.info(f"Processing file: {filename}")
+#             logger.info(f"Processing file: {filename}")
             
-            # Extract text from document
-            text = doc_processor.extract_text(filepath)
+#             # Extract text from document
+#             text = doc_processor.extract_text(filepath)
             
-            # Chunk the document
-            chunks = doc_processor.chunk_text(text)
+#             # Chunk the document
+#             chunks = doc_processor.chunk_text(text)
             
-            # Generate embeddings and store in Qdrant
-            doc_id = rag_service.index_document(
-                chunks=chunks,
-                metadata={
-                    'filename': filename,
-                    'source': filename,
-                    'upload_date': doc_processor.get_current_timestamp()
-                }
-            )
+#             # Generate embeddings and store in Qdrant
+#             doc_id = rag_service.index_document(
+#                 chunks=chunks,
+#                 metadata={
+#                     'filename': filename,
+#                     'source': filename,
+#                     'upload_date': doc_processor.get_current_timestamp()
+#                 }
+#             )
             
-            # Clean up uploaded file
-            os.remove(filepath)
+#             # Clean up uploaded file
+#             os.remove(filepath)
             
-            return jsonify({
-                'message': 'File processed successfully',
-                'document_id': doc_id,
-                'chunks_count': len(chunks),
-                'filename': filename
-            }), 200
+#             return jsonify({
+#                 'message': 'File processed successfully',
+#                 'document_id': doc_id,
+#                 'chunks_count': len(chunks),
+#                 'filename': filename
+#             }), 200
         
-        return jsonify({'error': 'File type not allowed'}), 400
+#         return jsonify({'error': 'File type not allowed'}), 400
     
-    except Exception as e:
-        logger.error(f"Error processing file: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+#     except Exception as e:
+#         logger.error(f"Error processing file: {str(e)}")
+#         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/chat', methods=['POST'])
 def chat():
-    """Chat endpoint - RAG query"""
+    """Chat endpoint - RAG query with LLM response"""
     try:
         data = request.get_json()
         logger.info(f"Received data: {data}")
@@ -110,15 +100,30 @@ def chat():
         
         logger.info(f"Processing query: {query}")
         
-        # Get RAG response
-        response = rag_service.query(
-            query=query,
-            top_k=5
-        )
+        # Get relevant documents from vector search
+        search_results = rag_service.query(query=query, top_k=5)
+        logger.info(f"Search results: {search_results}")
+        
+        # Build context from retrieved documents
+        context = "\n\n".join([doc.get('text', '') for doc in search_results['sources']])
+        
+        # Generate answer using ChatService
+        messages = [
+            {
+                "role": "system",
+                "content": "You are a helpful assistant. Answer the user's question based on the provided context. If the context doesn't contain relevant information, say so."
+            },
+            {
+                "role": "user",
+                "content": f"Context:\n{context}\n\nQuestion: {query}"
+            }
+        ]
+        
+        answer = chat_service.chat(messages)
         
         return jsonify({
-            'answer': response['answer'],
-            'sources': response['sources'],
+            'answer': answer,
+            'sources': search_results['sources'],
             'query': query
         }), 200
     
