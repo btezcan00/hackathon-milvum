@@ -25,7 +25,7 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 # Initialize services
 embedding_service = EmbeddingService()
 doc_processor = DocumentProcessor()
-qdrant_host = os.getenv('QDRANT_HOST', 'qdrant')
+qdrant_host = os.getenv('QDRANT_HOST', 'localhost')
 qdrant_port = int(os.getenv('QDRANT_PORT', '6333'))
 rag_service = RAGService(embedding_service, qdrant_host=qdrant_host, qdrant_port=qdrant_port)
 
@@ -101,9 +101,11 @@ def chat():
     """Chat endpoint - RAG query"""
     try:
         data = request.get_json()
-        query = data.get('query', '')
-        
+        logger.info(f"Received data: {data}")
+        query = data.get('query', '') if data else ''
+
         if not query:
+            logger.warning(f"Empty query received. Data: {data}")
             return jsonify({'error': 'Query is required'}), 400
         
         logger.info(f"Processing query: {query}")
@@ -145,4 +147,4 @@ def delete_document(doc_id):
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5001, debug=True)

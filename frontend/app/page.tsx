@@ -3,18 +3,20 @@
 import { ChatUI } from "@/components/chat/chat-ui";
 import { PDFViewer } from "@/components/pdf-viewer";
 import { useState } from "react";
+import { useClientOnly } from "@/hooks/use-client-only";
 
 export default function Home() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [selectedFileUrl, setSelectedFileUrl] = useState<string | null>(null);
+  const isClient = useClientOnly();
 
   const handleFileSelected = (file: File | null) => {
     setSelectedFile(file);
-    if (file) {
+    if (file && isClient) {
       const url = URL.createObjectURL(file);
       setSelectedFileUrl(url);
     } else {
-      if (selectedFileUrl) {
+      if (selectedFileUrl && isClient) {
         URL.revokeObjectURL(selectedFileUrl);
       }
       setSelectedFileUrl(null);
@@ -48,23 +50,25 @@ export default function Home() {
 
       {/* Main Content - Split Layout */}
       <main className="flex flex-1 overflow-hidden bg-white">
-        {/* PDF Viewer - 40% width on left */}
-        <div className="w-[40%] flex-shrink-0 h-[calc(100vh-160px)] border-r-2 border-gray-300">
-          <PDFViewer
-            file={selectedFile}
-            fileUrl={selectedFileUrl}
-            onClose={() => {
-              if (selectedFileUrl) {
-                URL.revokeObjectURL(selectedFileUrl);
-              }
-              setSelectedFile(null);
-              setSelectedFileUrl(null);
-            }}
-          />
-        </div>
+        {/* PDF Viewer - 40% width on left (only when file is selected) */}
+        {selectedFile && (
+          <div className="w-[40%] flex-shrink-0 h-[calc(100vh-160px)] border-r-2 border-gray-300">
+            <PDFViewer
+              file={selectedFile}
+              fileUrl={selectedFileUrl}
+              onClose={() => {
+                if (selectedFileUrl && isClient) {
+                  URL.revokeObjectURL(selectedFileUrl);
+                }
+                setSelectedFile(null);
+                setSelectedFileUrl(null);
+              }}
+            />
+          </div>
+        )}
 
-        {/* Chat Area - 60% width on right */}
-        <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Chat Area - Full width when no PDF, or 60% when PDF is open */}
+        <div className={`flex flex-col overflow-hidden ${selectedFile ? 'flex-1' : 'w-full'}`}>
           <div className="px-6 py-6 flex-shrink-0">
             <h2 className="text-2xl font-bold text-black mb-2">
               Stel een vraag over uw documenten

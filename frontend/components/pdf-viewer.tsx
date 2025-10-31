@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { X, FileText } from 'lucide-react';
+import { useClientOnly } from '@/hooks/use-client-only';
 
 interface PDFViewerProps {
   file: File | null;
@@ -11,8 +12,11 @@ interface PDFViewerProps {
 
 export function PDFViewer({ file, fileUrl, onClose }: PDFViewerProps) {
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const isClient = useClientOnly();
 
   useEffect(() => {
+    if (!isClient) return;
+    
     if (file && file.type === 'application/pdf') {
       const url = URL.createObjectURL(file);
       setPdfUrl(url);
@@ -24,7 +28,7 @@ export function PDFViewer({ file, fileUrl, onClose }: PDFViewerProps) {
     } else {
       setPdfUrl(null);
     }
-  }, [file, fileUrl]);
+  }, [file, fileUrl, isClient]);
 
   if (!pdfUrl && !file) {
     return (

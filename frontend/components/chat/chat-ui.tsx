@@ -1,7 +1,5 @@
 'use client';
 
-import { useChat } from '@ai-sdk/react';
-import { DefaultChatTransport } from 'ai';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { FileUpload } from '@/components/file-upload';
@@ -12,16 +10,18 @@ interface ChatUIProps {
   onFileSelected?: (file: File | null) => void;
 }
 
+interface Message {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+}
+
 export function ChatUI({ onFileSelected }: ChatUIProps) {
   const [input, setInput] = useState('');
+  const [messages, setMessages] = useState<Message[]>([]);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
-  const { messages, sendMessage, status } = useChat({
-    transport: new DefaultChatTransport({
-      api: '/api/chat',
-    }),
-  });
-
+  const [streaming, setStreaming] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -32,7 +32,7 @@ export function ChatUI({ onFileSelected }: ChatUIProps) {
 
   const handleFilesSelected = async (files: File[]) => {
     setSelectedFiles(files);
-    
+
     // Upload files to backend
     if (files.length > 0) {
       setUploading(true);
@@ -40,28 +40,26 @@ export function ChatUI({ onFileSelected }: ChatUIProps) {
         const uploadPromises = files.map(async (file) => {
           const formData = new FormData();
           formData.append('file', file);
-          
+
           const response = await fetch('/api/upload', {
             method: 'POST',
             body: formData,
           });
-          
+
           if (!response.ok) {
             throw new Error(`Failed to upload ${file.name}`);
           }
-          
+
           return response.json();
         });
 
         await Promise.all(uploadPromises);
-        
+
         // If first file is PDF, select it for viewing
         const firstPdf = files.find(f => f.type === 'application/pdf');
         if (firstPdf && onFileSelected) {
           onFileSelected(firstPdf);
         }
-        
-        // Note: We don't auto-send a message here to avoid interfering with chat flow
       } catch (error) {
         console.error('Upload error:', error);
         alert(`Er is een fout opgetreden bij het uploaden van de bestanden. Probeer het opnieuw.`);
@@ -71,6 +69,87 @@ export function ChatUI({ onFileSelected }: ChatUIProps) {
       }
     } else if (onFileSelected) {
       onFileSelected(null);
+    }
+  };
+
+  const sendMessage = async (content: string) => {
+    if (!content.trim() || streaming) return;
+
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      role: 'user',
+      content,
+    };
+
+    setMessages(prev => [...prev, userMessage]);
+    setStreaming(true);
+
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messages: [...messages, userMessage],
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to get response');
+      }
+
+      // Read the stream
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+
+      if (!reader) {
+        throw new Error('No response body');
+      }
+
+      let assistantMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: '',
+      };
+
+      setMessages(prev => [...prev, assistantMessage]);
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value);
+        const lines = chunk.split('\n').filter(line => line.trim() !== '');
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            if (data === '[DONE]') continue;
+
+            try {
+              const json = JSON.parse(data);
+              const content = json.choices?.[0]?.delta?.content;
+
+              if (content) {
+                assistantMessage.content += content;
+                setMessages(prev => {
+                  const newMessages = [...prev];
+                  newMessages[newMessages.length - 1] = { ...assistantMessage };
+                  return newMessages;
+                });
+              }
+            } catch (e) {
+              console.error('Error parsing SSE:', e);
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Chat error:', error);
+      alert('Er is een fout opgetreden. Probeer het opnieuw.');
+    } finally {
+      setStreaming(false);
     }
   };
 
@@ -120,10 +199,7 @@ export function ChatUI({ onFileSelected }: ChatUIProps) {
                 }`}
               >
                 <p className="text-sm leading-relaxed whitespace-pre-wrap" style={{ fontFamily: 'Verdana, sans-serif' }}>
-                  {message.parts
-                    .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
-                    .map((part) => part.text)
-                    .join('')}
+                  {message.content}
                 </p>
               </div>
 
@@ -135,7 +211,7 @@ export function ChatUI({ onFileSelected }: ChatUIProps) {
             </div>
           ))}
 
-          {status === 'streaming' && (
+          {streaming && (
             <div className="flex gap-4 justify-start">
               <div className="w-8 h-8 bg-[#154274] flex items-center justify-center flex-shrink-0">
                 <span className="text-white text-xs font-bold">AI</span>
@@ -160,8 +236,8 @@ export function ChatUI({ onFileSelected }: ChatUIProps) {
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          if (input.trim() && status !== 'streaming' && !uploading) {
-            sendMessage({ text: input });
+          if (input.trim() && !streaming && !uploading) {
+            sendMessage(input);
             setInput('');
           }
         }}
@@ -182,18 +258,18 @@ export function ChatUI({ onFileSelected }: ChatUIProps) {
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
-                  if (input.trim() && status !== 'streaming' && !uploading) {
-                    sendMessage({ text: input });
+                  if (input.trim() && !streaming && !uploading) {
+                    sendMessage(input);
                     setInput('');
                   }
                 }
               }}
-              disabled={status === 'streaming' || uploading}
+              disabled={streaming || uploading}
             />
           </div>
           <Button
             type="submit"
-            disabled={status === 'streaming' || !input.trim() || uploading}
+            disabled={streaming || !input.trim() || uploading}
             className="h-[70px] px-8 bg-[#154274] hover:bg-[#0f3054] text-white border-0 font-bold disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             style={{ fontFamily: 'Verdana, sans-serif' }}
           >
@@ -202,7 +278,7 @@ export function ChatUI({ onFileSelected }: ChatUIProps) {
                 <Loader2 className="h-5 w-5 animate-spin mr-2" />
                 Uploaden...
               </>
-            ) : status === 'streaming' ? (
+            ) : streaming ? (
               <Loader2 className="h-5 w-5 animate-spin" />
             ) : (
               <>
@@ -219,4 +295,3 @@ export function ChatUI({ onFileSelected }: ChatUIProps) {
     </div>
   );
 }
-

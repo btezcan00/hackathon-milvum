@@ -11,49 +11,9 @@ services:
     environment:
       - QDRANT__SERVICE__GRPC_PORT=6334
     restart: unless-stopped
-    networks:
-      - rag_network
     healthcheck:
       test: ["CMD-SHELL", "timeout 1 bash -c ': < /dev/tcp/localhost/6333' || exit 1"]
       interval: 10s
       timeout: 3s
       retries: 5
       start_period: 10s
-
-  # Backend API
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: rag_backend
-    ports:
-      - "5001:5000"
-    environment:
-      - QDRANT_HOST=qdrant
-      - QDRANT_PORT=6333
-    depends_on:
-      qdrant:
-        condition: service_healthy
-    networks:
-      - rag_network
-    restart: unless-stopped
-
-  # Frontend
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    container_name: rag_frontend
-    ports:
-      - "3000:3000"
-    environment:
-      - NEXT_PUBLIC_BACKEND_URL=http://backend:5000
-    depends_on:
-      - backend
-    networks:
-      - rag_network
-    restart: unless-stopped
-
-networks:
-  rag_network:
-    driver: bridge
