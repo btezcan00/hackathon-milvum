@@ -21,7 +21,7 @@ services:
       dockerfile: Dockerfile
     container_name: rag_backend
     ports:
-      - "5050:5000"
+      - "5001:5001"
     env_file:
       - .env
     environment:

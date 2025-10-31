@@ -10,7 +10,7 @@ export async function POST(req: Request) {
       });
     }
 
-    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5001';
 
     // Create FormData for backend
     const backendFormData = new FormData();

@@ -2,7 +2,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 import os
-# from services.document_processor import DocumentProcessor
+from services.document_processor import DocumentProcessor
 from services.rag_service import RAGService
 from services.llm_service import EmbeddingService, ChatService
 import logging
@@ -25,7 +25,7 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 # Initialize services
 embedding_service = EmbeddingService()
 chat_service = ChatService()
-# doc_processor = DocumentProcessor()
+doc_processor = DocumentProcessor()
 rag_service = RAGService(embedding_service)
 
 def allowed_file(filename):
@@ -36,55 +36,55 @@ def health_check():
     """Health check endpoint"""
     return jsonify({'status': 'healthy', 'service': 'RAG Backend'}), 200
 
-# @app.route('/api/upload', methods=['POST'])
-# def upload_file():
-#     """Upload and process document"""
-#     try:
-#         if 'file' not in request.files:
-#             return jsonify({'error': 'No file part'}), 400
+@app.route('/api/upload', methods=['POST'])
+def upload_file():
+    """Upload and process document"""
+    try:
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file part'}), 400
         
-#         file = request.files['file']
-#         if file.filename == '':
-#             return jsonify({'error': 'No selected file'}), 400
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'error': 'No selected file'}), 400
         
-#         if file and allowed_file(file.filename):
-#             filename = secure_filename(file.filename)
-#             filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-#             file.save(filepath)
+        if file and allowed_file(file.filename):
+            filename = secure_filename(file.filename)
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            file.save(filepath)
             
-#             logger.info(f"Processing file: {filename}")
+            logger.info(f"Processing file: {filename}")
             
-#             # Extract text from document
-#             text = doc_processor.extract_text(filepath)
+            # Extract text from document
+            text = doc_processor.extract_text(filepath)
             
-#             # Chunk the document
-#             chunks = doc_processor.chunk_text(text)
+            # Chunk the document
+            chunks = doc_processor.chunk_text(text)
             
-#             # Generate embeddings and store in Qdrant
-#             doc_id = rag_service.index_document(
-#                 chunks=chunks,
-#                 metadata={
-#                     'filename': filename,
-#                     'source': filename,
-#                     'upload_date': doc_processor.get_current_timestamp()
-#                 }
-#             )
+            # Generate embeddings and store in Qdrant
+            doc_id = rag_service.index_document(
+                chunks=chunks,
+                metadata={
+                    'filename': filename,
+                    'source': filename,
+                    'upload_date': doc_processor.get_current_timestamp()
+                }
+            )
             
-#             # Clean up uploaded file
-#             os.remove(filepath)
+            # Clean up uploaded file
+            os.remove(filepath)
             
-#             return jsonify({
-#                 'message': 'File processed successfully',
-#                 'document_id': doc_id,
-#                 'chunks_count': len(chunks),
-#                 'filename': filename
-#             }), 200
+            return jsonify({
+                'message': 'File processed successfully',
+                'document_id': doc_id,
+                'chunks_count': len(chunks),
+                'filename': filename
+            }), 200
         
-#         return jsonify({'error': 'File type not allowed'}), 400
+        return jsonify({'error': 'File type not allowed'}), 400
     
-#     except Exception as e:
-#         logger.error(f"Error processing file: {str(e)}")
-#         return jsonify({'error': str(e)}), 500
+    except Exception as e:
+        logger.error(f"Error processing file: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/chat', methods=['POST'])
 def chat():

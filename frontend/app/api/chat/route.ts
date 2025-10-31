@@ -1,4 +1,3 @@
-const GROQ_API_KEY = process.env.GROQ_API_KEY || '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';
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5001';
 
 export async function POST(req: Request) {
@@ -14,10 +13,7 @@ export async function POST(req: Request) {
     // Extract text from message
     const userQuery = lastMessage.content || '';
 
-    // Get RAG context from backend
-    let ragContext = '';
-    let ragSources: any[] = [];
-
+    // Call backend RAG service which handles both retrieval and generation
     try {
       const ragResponse = await fetch(`${BACKEND_URL}/api/chat`, {
         method: 'POST',
@@ -27,75 +23,71 @@ export async function POST(req: Request) {
         body: JSON.stringify({ query: userQuery }),
       });
 
-      if (ragResponse.ok) {
-        const ragData = await ragResponse.json();
-        ragSources = ragData.sources || [];
+      if (!ragResponse.ok) {
+        const errorData = await ragResponse.json().catch(() => ({ error: ragResponse.statusText }));
+        throw new Error(`Backend error: ${ragResponse.status} - ${errorData.error || ragResponse.statusText}`);
+      }
 
-        // Combine context from sources
-        const contextTexts = ragSources
-          .slice(0, 3) // Use top 3 sources
-          .map((source: any) => source.text)
-          .filter(Boolean);
+      const ragData = await ragResponse.json();
+      
+      // Create a streaming response that sends the answer
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream({
+        start(controller) {
+          // Send the answer as a streaming response
+          const answer = ragData.answer || 'Ik kon geen antwoord vinden op uw vraag.';
+          
+          // Split the answer into chunks for streaming effect
+          const words = answer.split(' ');
+          let currentChunk = '';
+          
+          const sendChunk = (index: number) => {
+            if (index >= words.length) {
+              // Send final chunk and close
+              controller.enqueue(encoder.encode(`data: {"type":"text","text":""}
 
-        if (contextTexts.length > 0) {
-          ragContext = `Relevante informatie uit geüploade documenten:\n\n${contextTexts.join('\n\n')}`;
+`));
+              controller.enqueue(encoder.encode(`data: [DONE]
+
+`));
+              controller.close();
+              return;
+            }
+            
+            currentChunk += (index > 0 ? ' ' : '') + words[index];
+            
+            // Send chunk every few words
+            if (index % 3 === 0 || index === words.length - 1) {
+              const chunk = {
+                type: 'text',
+                text: currentChunk
+              };
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`));
+              currentChunk = '';
+            }
+            
+            // Continue with next word after a small delay
+            setTimeout(() => sendChunk(index + 1), 50);
+          };
+          
+          // Start sending chunks
+          sendChunk(0);
         }
-      }
-    } catch (ragError) {
-      console.warn('RAG context fetch failed, continuing without context:', ragError);
-    }
-
-    // Build messages for LLM
-    const systemMessage = ragContext
-      ? `Je bent een behulpzame assistent. Gebruik de volgende context uit geüploade documenten om vragen te beantwoorden. Als de context geen relevante informatie bevat, geef dan aan dat je de informatie niet in de documenten hebt gevonden.\n\n${ragContext}`
-      : 'Je bent een behulpzame assistent. Beantwoord vragen op basis van de beschikbare informatie.';
-
-    // Convert messages format for Groq API
-    const formattedMessages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }> = [
-      {
-        role: 'system',
-        content: systemMessage,
-      }
-    ];
-
-    // Add conversation history
-    for (const msg of messages) {
-      formattedMessages.push({
-        role: msg.role as 'user' | 'assistant',
-        content: msg.content || '',
       });
+
+      return new Response(stream, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+        },
+      });
+      
+    } catch (ragError) {
+      console.error('RAG service error:', ragError);
+      throw ragError;
     }
-
-    // Call Groq API directly
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${GROQ_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
-        messages: formattedMessages,
-        temperature: 0.6,
-        max_tokens: 4096,
-        top_p: 0.95,
-        stream: true,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Groq API error: ${response.status} - ${errorText}`);
-    }
-
-    // Return the stream directly (SSE format)
-    return new Response(response.body, {
-      headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-      },
-    });
+    
   } catch (error: any) {
     console.error('Chat API error:', error);
     const errorMessage = error instanceof Error ? error.message : 'Internal server error';
