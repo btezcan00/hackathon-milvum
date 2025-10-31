@@ -1,6 +1,9 @@
-Flask==3.0.0
-flask-cors==4.0.0
-qdrant-client>=1.7.1
+flask
+flask-cors
+pinecone-client
+requests
+python-dotenv
+werkzeug
 sentence-transformers>=2.2.2
 PyPDF2==3.0.1
 python-docx==1.1.0

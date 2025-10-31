@@ -7,6 +7,8 @@ from services.document_processor import DocumentProcessor
 from services.rag_service import RAGService
 from services.llm_service import EmbeddingService, ChatService
 import logging
+from datetime import datetime
+import uuid
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -28,6 +30,9 @@ embedding_service = EmbeddingService()
 chat_service = ChatService()
 doc_processor = DocumentProcessor()
 rag_service = RAGService(embedding_service)
+
+# Conversation memory store (in-memory, keyed by conversation_id)
+conversations = {}
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -89,52 +94,40 @@ def upload_file():
 
 @app.route('/api/chat', methods=['POST'])
 def chat():
-    """Streaming chat endpoint - RAG query with LLM response"""
+    """Chat endpoint - RAG query with LLM response and conversation memory"""
     try:
         data = request.get_json()
-        logger.info(f"Received data: {data}")
+        query = data.get('query', '')
+        conversation_id = data.get('conversation_id', None)  # Optional conversation ID
         
-        # Handle both 'query' and 'messages' formats
-        if 'messages' in data:
-            # Extract last user message
-            messages = data['messages']
-            last_message = messages[-1] if messages else {}
-            query = last_message.get('content', '') if last_message.get('role') == 'user' else ''
-        else:
-            query = data.get('query', '') if data else ''
-
         if not query:
-            logger.warning(f"Empty query received. Data: {data}")
             return jsonify({'error': 'Query is required'}), 400
         
-        logger.info(f"Processing query: {query}")
+        # Create or retrieve conversation
+        if not conversation_id:
+            conversation_id = str(uuid.uuid4())
+            conversations[conversation_id] = []
+        elif conversation_id not in conversations:
+            conversations[conversation_id] = []
+        
+        logger.info(f"Processing query in conversation {conversation_id}: {query}")
         
         # Get relevant documents from vector search
         search_results = rag_service.query(query=query, top_k=5)
-        logger.info(f"Found {len(search_results['sources'])} relevant sources")
         
         # Build context from retrieved documents
         context = "\n\n".join([doc.get('text', '') for doc in search_results['sources']])
         
-        # Prepare system message with context
-        system_content = "Je bent een behulpzame assistent voor de Nederlandse overheid. Beantwoord vragen op basis van de verstrekte context uit officiële documenten. Als de context geen relevante informatie bevat, geef dit duidelijk aan. Antwoord altijd in het Nederlands."
-        
-        if context.strip():
-            system_content += f"\n\nContext uit geüploade documenten:\n{context}"
-        
-        # Generate streaming response using ChatService
-        llm_messages = [
+        # Build conversation history for LLM
+        messages = [
             {
                 "role": "system",
-                "content": system_content
-            },
-            {
-                "role": "user",
-                "content": query
+                "content": "You are a helpful assistant. Answer the user's question based on the provided context and conversation history. If the context doesn't contain relevant information, say so. Maintain context from previous messages in the conversation."
             }
         ]
         
-        logger.info(f"Messages for LLM: {llm_messages}")
+        # Add conversation history
+        messages.extend(conversations[conversation_id])
         
         def generate_stream():
             try:
@@ -166,17 +159,36 @@ def chat():
                 
                 yield f"data: {json.dumps({'type': 'error', 'error': error_message})}\n\n"
                 yield f"data: [DONE]\n\n"
+        # Add current query with context
+        messages.append({
+            "role": "user",
+            "content": f"Context from documents:\n{context}\n\nUser question: {query}"
+        })
         
-        return Response(
-            generate_stream(),
-            mimetype='text/event-stream',
-            headers={
-                'Cache-Control': 'no-cache',
-                'Connection': 'keep-alive',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Headers': 'Content-Type'
-            }
-        )
+        # Generate answer using ChatService
+        answer = chat_service.chat(messages)
+        
+        # Store this exchange in conversation history
+        conversations[conversation_id].append({
+            "role": "user",
+            "content": query
+        })
+        conversations[conversation_id].append({
+            "role": "assistant",
+            "content": answer
+        })
+        
+        # Limit conversation history to last 10 exchanges (20 messages)
+        if len(conversations[conversation_id]) > 20:
+            conversations[conversation_id] = conversations[conversation_id][-20:]
+        
+        return jsonify({
+            'answer': answer,
+            'sources': search_results['sources'],
+            'query': query,
+            'conversation_id': conversation_id,
+            'message_count': len(conversations[conversation_id])
+        }), 200
     
     except Exception as e:
         logger.error(f"Error processing query: {str(e)}")
@@ -200,6 +212,50 @@ def delete_document(doc_id):
         return jsonify({'message': 'Document deleted successfully'}), 200
     except Exception as e:
         logger.error(f"Error deleting document: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/conversations/<conversation_id>', methods=['GET'])
+def get_conversation(conversation_id):
+    """Get conversation history"""
+    try:
+        if conversation_id not in conversations:
+            return jsonify({'error': 'Conversation not found'}), 404
+        
+        return jsonify({
+            'conversation_id': conversation_id,
+            'messages': conversations[conversation_id]
+        }), 200
+    except Exception as e:
+        logger.error(f"Error retrieving conversation: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/conversations/<conversation_id>', methods=['DELETE'])
+def clear_conversation(conversation_id):
+    """Clear conversation history"""
+    try:
+        if conversation_id in conversations:
+            del conversations[conversation_id]
+        
+        return jsonify({'message': 'Conversation cleared'}), 200
+    except Exception as e:
+        logger.error(f"Error clearing conversation: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/conversations', methods=['GET'])
+def list_conversations():
+    """List all active conversations"""
+    try:
+        return jsonify({
+            'conversations': [
+                {
+                    'id': conv_id,
+                    'message_count': len(messages)
+                }
+                for conv_id, messages in conversations.items()
+            ]
+        }), 200
+    except Exception as e:
+        logger.error(f"Error listing conversations: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':

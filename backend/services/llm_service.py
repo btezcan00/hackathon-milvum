@@ -3,17 +3,17 @@ from typing import List, Optional, Dict, Any, Iterator
 import os
 import json
 
-SILICONFLOW_API_URL = "https://api.siliconflow.com/v1/embeddings"
-SILICONFLOW_MODEL = "Qwen/Qwen3-Embedding-8B"
-GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL = "openai/gpt-oss-safeguard-20b"
+OPENAI_API_URL = "https://api.openai.com/v1/embeddings"
+OPENAI_EMBEDDING_MODEL = "text-embedding-3-small"
+OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
+OPENAI_CHAT_MODEL = "gpt-4o-mini"
 
 class EmbeddingService:
     def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
-        self.api_key = api_key or os.getenv("SILICONFLOW_API_KEY")
-        self.model = model or SILICONFLOW_MODEL
-        self.api_url = SILICONFLOW_API_URL
-        self.dimension = 1024  # Qwen3-Embedding-8B dimension
+        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+        self.model = model or OPENAI_EMBEDDING_MODEL
+        self.api_url = OPENAI_API_URL
+        self.dimension = 1536  # text-embedding-3-small dimension
         self.headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
@@ -35,8 +35,7 @@ class EmbeddingService:
         """Get embedding for a single string."""
         payload = {
             "model": self.model,
-            "input": text,
-            "dimensions": self.dimension
+            "input": text
         }
         response = requests.post(self.api_url, headers=self.headers, json=payload)
         response.raise_for_status()
@@ -47,8 +46,7 @@ class EmbeddingService:
         """Get embeddings for a list of strings (batch)."""
         payload = {
             "model": self.model,
-            "input": texts,
-            "dimensions": self.dimension
+            "input": texts
         }
         response = requests.post(self.api_url, headers=self.headers, json=payload)
         response.raise_for_status()
@@ -58,9 +56,9 @@ class EmbeddingService:
 
 class ChatService:
     def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
-        self.api_key = api_key or os.getenv("GROQ_API_KEY")
-        self.model = model or GROQ_MODEL
-        self.api_url = GROQ_API_URL
+        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+        self.model = model or OPENAI_CHAT_MODEL
+        self.api_url = OPENAI_CHAT_URL
         self.headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
