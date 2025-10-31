@@ -118,7 +118,7 @@ def chat():
                 "content": f"Context:\n{context}\n\nQuestion: {query}"
             }
         ]
-        
+        logger.info(f"Messages for LLM: {messages}")
         answer = chat_service.chat(messages)
         
         return jsonify({
