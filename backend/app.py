@@ -25,7 +25,18 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 # Initialize services
 embedding_service = EmbeddingService()
 doc_processor = DocumentProcessor()
-rag_service = RAGService(embedding_service)
+qdrant_host = os.getenv('QDRANT_HOST', 'qdrant')
+qdrant_port = int(os.getenv('QDRANT_PORT', '6333'))
+rag_service = RAGService(embedding_service, qdrant_host=qdrant_host, qdrant_port=qdrant_port)
+
+# Initialize Qdrant collection on app startup
+# Note: Embedding model loads lazily on first use
+try:
+    rag_service.initialize()
+    logger.info("RAG service initialized successfully")
+except Exception as e:
+    logger.error(f"Failed to initialize RAG service: {str(e)}")
+    logger.info("App will continue but RAG features may not work until services are ready")
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -134,11 +145,4 @@ def delete_document(doc_id):
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    # Initialize Qdrant collection on startup
-    try:
-        rag_service.initialize()
-        logger.info("RAG service initialized successfully")
-    except Exception as e:
-        logger.error(f"Failed to initialize RAG service: {str(e)}")
-    
     app.run(host='0.0.0.0', port=5000, debug=True)

@@ -21,7 +21,13 @@ class RAGService:
         self.embedding_service = embedding_service
         self.qdrant_client = QdrantClient(host=qdrant_host, port=qdrant_port)
         self.collection_name = "rag_documents"
-        self.vector_size = embedding_service.get_dimension()
+        # Get dimension lazily - don't load model until needed
+        try:
+            self.vector_size = embedding_service.get_dimension()
+        except Exception as e:
+            logger.warning(f"Could not get embedding dimension during init: {str(e)}")
+            logger.info("Will retry when model is actually used")
+            self.vector_size = 384  # Default for all-MiniLM-L6-v2
         
     def initialize(self):
         """Initialize Qdrant collection"""
