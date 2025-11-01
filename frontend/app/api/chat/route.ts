@@ -3,12 +3,12 @@ const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:500
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    
+
     // Backend expects { query } format, but frontend may send { messages }
     // Extract query from messages if needed
     let query = body.query;
     let conversation_id = body.conversation_id;
-    
+
     if (body.messages && Array.isArray(body.messages) && body.messages.length > 0) {
       // Find the last user message
       const lastUserMessage = body.messages.slice().reverse().find((msg: any) => msg.role === 'user');
@@ -28,7 +28,7 @@ export async function POST(req: Request) {
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ 
+      body: JSON.stringify({
         query: query,
         conversation_id: conversation_id
       }),
@@ -54,7 +54,7 @@ export async function POST(req: Request) {
       // Handle non-streaming response (fallback)
       const data = await backendResponse.json();
       const encoder = new TextEncoder();
-      
+
       const stream = new ReadableStream({
         start(controller) {
           const answer = data.answer || 'Ik kon geen antwoord vinden op uw vraag.';
@@ -72,7 +72,7 @@ export async function POST(req: Request) {
         },
       });
     }
-    
+
   } catch (error: any) {
     console.error('Chat API error:', error);
     const errorMessage = error instanceof Error ? error.message : 'Internal server error';

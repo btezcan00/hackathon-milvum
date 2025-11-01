@@ -171,3 +171,4 @@ class RAGService:
             'answer': answer,
             'sources': sources
         }
+    
