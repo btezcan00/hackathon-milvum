@@ -57,6 +57,11 @@ export function FilesPanel({ files, citations = [], selectedCitationUrl, onClose
     return items;
   }, [pdfFiles, citations]);
 
+  // Don't render the panel if there are no sources to display
+  if (sources.length === 0) {
+    return null;
+  }
+
   // Auto-select citation if provided
   useEffect(() => {
     if (selectedCitationUrl && sources.length > 0) {
@@ -499,7 +504,7 @@ export function FilesPanel({ files, citations = [], selectedCitationUrl, onClose
               <div className="text-center">
                 <FileText className="h-16 w-16 text-gray-400 mx-auto mb-4" />
                 <p className="text-sm text-gray-500">
-                  {sources.length === 0 ? 'No sources to display' : 'Select a source to view'}
+                  Select a source to view
                 </p>
               </div>
             </div>

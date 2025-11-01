@@ -221,12 +221,12 @@ class DocumentPipeline:
                     'document_name': chunk['metadata']['document_name'],
                     'page_numbers': [str(p) for p in chunk['metadata']['page_numbers']]  # Convert to strings
                 }
-                # Add Google Drive URL if provided
+                # Add GCS/Google Drive URL if provided
                 if drive_url:
-                    doc['google_drive_url'] = drive_url
-                    logger.info(f"[DocumentPipeline] Storing Google Drive URL for {document_name}: {drive_url}")
+                    doc['gcs_url'] = drive_url  # Store as gcs_url for consistency
+                    logger.info(f"[DocumentPipeline] Storing GCS URL for {document_name}: {drive_url}")
                 else:
-                    logger.info(f"[DocumentPipeline] No Google Drive URL provided for {document_name}")
+                    logger.info(f"[DocumentPipeline] No GCS URL provided for {document_name}")
                 documents.append(doc)
                 vectors.append(embedding)
             

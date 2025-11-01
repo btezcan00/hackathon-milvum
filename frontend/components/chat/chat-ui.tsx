@@ -6,6 +6,7 @@ import { Send, Loader2, Plus, Search } from 'lucide-react';
 import { useRef, useEffect, useState, DragEvent } from 'react';
 import { CitationList, type Citation } from '@/components/citations/citation-list';
 import { createHighlightUrl } from '@/components/citations/citation-highlighter';
+import { CrawlingWebsites, type CrawlingWebsite } from '@/components/chat/crawling-websites';
 
 interface ChatUIProps {
   onFileSelected?: (file: File | null) => void;
@@ -27,6 +28,8 @@ export function ChatUI({ onFileSelected }: ChatUIProps) {
   const [isDragOver, setIsDragOver] = useState(false);
   const [researchMode, setResearchMode] = useState(false);
   const [researchUrls, setResearchUrls] = useState<string>('');
+  const [crawlingWebsites, setCrawlingWebsites] = useState<CrawlingWebsite[]>([]);
+  const [isCrawling, setIsCrawling] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const messageIdCounter = useRef<number>(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -148,8 +151,12 @@ export function ChatUI({ onFileSelected }: ChatUIProps) {
 
     try {
       // If research mode is enabled, use research endpoint
-      if (researchMode && researchUrls.trim()) {
-        const urls = researchUrls.split('\n').filter(url => url.trim()).map(url => url.trim());
+      if (researchMode) {
+        const urls = researchUrls.trim() ? researchUrls.split('\n').filter(url => url.trim()).map(url => url.trim()) : [];
+        
+        // Show crawling indicator
+        setIsCrawling(true);
+        setCrawlingWebsites([]); // Clear previous websites
         
         const response = await fetch('/api/research', {
           method: 'POST',
@@ -158,17 +165,24 @@ export function ChatUI({ onFileSelected }: ChatUIProps) {
           },
           body: JSON.stringify({
             query: content,
-            urls: urls,
+            urls: urls.length > 0 ? urls : undefined, // Only send if provided
             max_results: 5,
           }),
         });
 
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({ error: response.statusText }));
+          setIsCrawling(false);
           throw new Error(errorData.error || `Failed to get research response (${response.status})`);
         }
 
         const data = await response.json();
+        
+        // Update crawling websites from response
+        if (data.selected_websites && Array.isArray(data.selected_websites)) {
+          setCrawlingWebsites(data.selected_websites);
+        }
+        setIsCrawling(false);
 
         messageIdCounter.current += 1;
         const assistantMessage: Message = {
@@ -397,16 +411,27 @@ export function ChatUI({ onFileSelected }: ChatUIProps) {
           ))}
 
           {streaming && (
-            <div className="flex gap-4 justify-start">
-              <div className="w-8 h-8 bg-[#154274] flex items-center justify-center flex-shrink-0">
-                <span className="text-white text-xs font-bold">AI</span>
-              </div>
-              <div className="px-5 py-3 bg-gray-50 border border-gray-300">
-                <div className="flex items-center gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin text-[#154274]" />
-                  <span className="text-sm text-black">Bezig met verwerken...</span>
+            <div className="flex flex-col gap-3">
+              <div className="flex gap-4 justify-start">
+                <div className="w-8 h-8 bg-[#154274] flex items-center justify-center flex-shrink-0">
+                  <span className="text-white text-xs font-bold">AI</span>
+                </div>
+                <div className="px-5 py-3 bg-gray-50 border border-gray-300">
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin text-[#154274]" />
+                    <span className="text-sm text-black">Bezig met verwerken...</span>
+                  </div>
                 </div>
               </div>
+              {/* Show crawling websites if in research mode */}
+              {researchMode && (isCrawling || crawlingWebsites.length > 0) && (
+                <div className="ml-12">
+                  <CrawlingWebsites 
+                    websites={crawlingWebsites} 
+                    isCrawling={isCrawling}
+                  />
+                </div>
+              )}
             </div>
           )}
         </div>

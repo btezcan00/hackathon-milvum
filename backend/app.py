@@ -49,7 +49,7 @@ chat_service = ChatService()
 groq_service = GroqService()  # Fast model for URL classification
 rag_service = RAGService(embedding_service)
 citation_service = CitationService(embedding_service)
-url_selector = URLSelector(groq_service)  # Use Groq for fast URL selection
+url_selector = URLSelector(groq_service, chat_service)  # Use ChatService for intelligent website selection with better location awareness
 document_pipeline = DocumentPipeline(embedding_service, rag_service.pinecone_client)
 
 # Web crawler will be initialized per request (to avoid keeping browser open)
@@ -84,16 +84,20 @@ def upload_file():
         if not files or files[0].filename == '':
             return jsonify({'error': 'No files provided'}), 400
         
-        # Get Google Drive URLs if provided (as form data or JSON)
+        # Get GCS/Google Drive URLs if provided (as form data or JSON)
         drive_urls = []
         if request.form:
             # Get drive_urls from form data (can be multiple, matching files)
-            drive_urls_raw = request.form.getlist('drive_url') or request.form.getlist('driveUrl') or request.form.getlist('google_drive_url')
+            drive_urls_raw = request.form.getlist('gcs_url') or request.form.getlist('drive_url') or request.form.getlist('driveUrl') or request.form.getlist('google_drive_url')
             drive_urls = [url for url in drive_urls_raw if url and url.strip()]
         elif request.is_json:
             # If JSON request, get from JSON body
             data = request.get_json()
-            if isinstance(data, dict) and 'drive_urls' in data:
+            if isinstance(data, dict) and 'gcs_urls' in data:
+                drive_urls = data['gcs_urls'] if isinstance(data['gcs_urls'], list) else [data['gcs_urls']]
+            elif isinstance(data, dict) and 'gcs_url' in data:
+                drive_urls = [data['gcs_url']] if data['gcs_url'] else []
+            elif isinstance(data, dict) and 'drive_urls' in data:
                 drive_urls = data['drive_urls'] if isinstance(data['drive_urls'], list) else [data['drive_urls']]
             elif isinstance(data, dict) and 'drive_url' in data:
                 drive_urls = [data['drive_url']] if data['drive_url'] else []
@@ -114,7 +118,7 @@ def upload_file():
         
         logger.info(f"Processing {len(files)} file(s)...")
         if drive_urls:
-            logger.info(f"Google Drive URLs provided for {len(drive_urls)} file(s)")
+            logger.info(f"GCS URLs provided for {len(drive_urls)} file(s): {drive_urls}")
         
         # Process files in parallel with drive URLs
         results = document_pipeline.process_files_parallel(
@@ -372,8 +376,8 @@ Geef een helder antwoord op basis van de bovenstaande context. Gebruik [1], [2],
                 logger.info(f"[Citation] Metadata keys: {list(metadata.keys())}")
                 logger.info(f"[Citation] Full metadata: {metadata}")
                 
-                # Extract Google Drive link if available in metadata
-                drive_url = metadata.get('google_drive_url') or metadata.get('drive_url') or metadata.get('gdrive_url') or None
+                # Extract GCS/Google Drive link if available in metadata
+                drive_url = metadata.get('gcs_url') or metadata.get('gcp_url') or metadata.get('google_drive_url') or metadata.get('drive_url') or metadata.get('gdrive_url') or None
                 logger.info(f"[Citation] Extracted drive_url: {drive_url}")
                 # Ensure we have a valid URL string (not None or empty)
                 if drive_url and isinstance(drive_url, str) and drive_url.strip():
@@ -539,8 +543,11 @@ def research():
         query = data.get('query', '')
         conversation_id = data.get('conversation_id', None)
         max_results = data.get('max_results', 5)
-        urls = data.get('urls', [])  # Optional: specific URLs to crawl
+        # Legacy support: allow URLs to be provided, but prefer websites
+        urls = data.get('urls', [])
+        websites = data.get('websites', [])  # Optional: specific websites (domains) to crawl
         domain_filter = data.get('domain_filter', [])
+        max_pages_per_website = data.get('max_pages_per_website', 10)  # Pages to crawl per website
         
         if not query:
             return jsonify({'error': 'Query is required'}), 400
@@ -558,92 +565,191 @@ def research():
         web_crawler = get_web_crawler()
         
         try:
-            # Generate or use provided URLs
-            if not urls:
-                # Automatically select relevant URLs based on the query using Groq
-                logger.info(f"No URLs provided, selecting relevant URLs using Groq for query: {query[:100]}...")
+            # Select websites using agent (or use provided websites/URLs)
+            selected_websites = []
+            
+            if websites:
+                # Use provided websites
+                logger.info(f"Using {len(websites)} provided websites")
+                # Convert domains to website dicts
+                # Access unique_websites through a public method (we'll add one if needed)
+                unique_websites = getattr(url_selector, '_unique_websites', [])
+                domain_to_website = {w["domain"]: w for w in unique_websites}
+                for website_domain in websites:
+                    if website_domain in domain_to_website:
+                        selected_websites.append(domain_to_website[website_domain])
+                    else:
+                        # If it's a URL, extract domain and find matching website
+                        from urllib.parse import urlparse
+                        parsed = urlparse(website_domain if website_domain.startswith('http') else f'https://{website_domain}')
+                        domain = parsed.netloc.lower().replace('www.', '')
+                        if domain in domain_to_website:
+                            selected_websites.append(domain_to_website[domain])
+            elif urls:
+                # Legacy mode: convert URLs to websites
+                logger.info(f"Legacy mode: Converting {len(urls)} URLs to websites for multi-page crawling")
+                unique_websites = getattr(url_selector, '_unique_websites', [])
+                domain_to_website = {w["domain"]: w for w in unique_websites}
+                seen_domains = set()
+                for url in urls:
+                    from urllib.parse import urlparse
+                    parsed = urlparse(url)
+                    domain = parsed.netloc.lower().replace('www.', '')
+                    if domain in domain_to_website and domain not in seen_domains:
+                        selected_websites.append(domain_to_website[domain])
+                        seen_domains.add(domain)
+            else:
+                # Agent selects websites automatically
+                logger.info(f"No websites/URLs provided, agent selecting relevant websites for query: {query[:100]}...")
                 try:
-                    urls = url_selector.select_urls(query, max_urls=max_results + 2)  # Get a few extra URLs for safety
+                    # Agent selects websites (default: 2 websites for focused crawling)
+                    max_websites = 2
+                    selected_websites = url_selector.select_websites(query, max_websites=max_websites)
                 except ValueError as e:
                     # Groq-specific errors (API key issues, etc.)
                     error_msg = str(e)
-                    logger.error(f"Groq URL selection failed: {error_msg}")
+                    logger.error(f"Agent website selection failed: {error_msg}")
                     return jsonify({
-                        'error': f'URL selection failed: {error_msg}. Please ensure GROQ_API_KEY is set in your .env file.',
+                        'error': f'Website selection failed: {error_msg}. Please ensure GROQ_API_KEY is set in your .env file.',
                         'query': query,
                         'conversation_id': conversation_id
                     }), 400
                 except Exception as e:
-                    logger.error(f"Unexpected error in URL selection: {str(e)}", exc_info=True)
+                    logger.error(f"Unexpected error in website selection: {str(e)}", exc_info=True)
                     return jsonify({
-                        'error': f'Failed to select URLs for crawling: {str(e)}',
+                        'error': f'Failed to select websites for crawling: {str(e)}',
                         'query': query,
                         'conversation_id': conversation_id
                     }), 500
-                
-                if not urls:
-                    return jsonify({
-                        'error': 'Could not find relevant government sources for your query. Please try rephrasing your question.',
-                        'query': query,
-                        'conversation_id': conversation_id
-                    }), 200
-                
-                logger.info(f"Selected {len(urls)} URLs automatically")
-                for i, url in enumerate(urls, 1):
-                    logger.info(f"  [{i}] {url}")
             
-            # Filter URLs by allowed domains if domain_filter provided
+            if not selected_websites:
+                return jsonify({
+                    'error': 'Could not find relevant government websites for your query. Please try rephrasing your question.',
+                    'query': query,
+                    'conversation_id': conversation_id
+                }), 200
+            
+            logger.info(f"Agent selected {len(selected_websites)} websites for multi-page crawling")
+            for i, website in enumerate(selected_websites, 1):
+                logger.info(f"  [{i}] {website['domain']} (entry: {website['entry_url']})")
+            
+            # Filter by allowed domains if domain_filter provided
             if domain_filter:
                 web_crawler.allowed_domains = domain_filter
             
-            # Crawl URLs
+            # Crawl each website for multiple pages
             # Use a single event loop for both crawling and cleanup to avoid loop conflicts
-            logger.info(f"Starting to crawl {len(urls)} URLs for query: '{query[:100]}'...")
-            for i, url in enumerate(urls, 1):
-                logger.info(f"  Will crawl [{i}/{len(urls)}]: {url}")
+            logger.info(f"Starting multi-page crawl of {len(selected_websites)} websites for query: '{query[:100]}'...")
             
             # Create event loop for this request
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             crawled_content = []
-            try:
-                crawled_content = loop.run_until_complete(
-                    web_crawler.crawl_urls(urls, query)
-                )
-            finally:
-                # Always clean up in the same loop, even if crawling failed
+            
+            async def crawl_all_websites():
+                """Async function to crawl all selected websites in parallel"""
                 try:
-                    loop.run_until_complete(web_crawler.close())
-                except Exception as e:
-                    # Cleanup errors are non-critical - browser processes will be cleaned up by OS
-                    logger.debug(f"Non-critical cleanup error (browser will auto-cleanup): {str(e)}")
+                    # Crawl all websites in parallel for faster execution
+                    logger.info(f"Starting parallel crawl of {len(selected_websites)} websites")
+                    
+                    async def crawl_single_website(website: Dict, index: int) -> List[Dict]:
+                        """Crawl a single website"""
+                        domain = website['domain']
+                        entry_url = website['entry_url']
+                        title = website.get('title', domain)
+                        
+                        logger.info(f"[Website {index+1}/{len(selected_websites)}] Starting multi-page crawl: {domain}")
+                        
+                        try:
+                            # Use multi-page crawling for this website
+                            website_content = await web_crawler.crawl_website_multi_page(
+                                entry_url=entry_url,
+                                query=query,
+                                max_pages=max_pages_per_website,
+                                depth=2  # Crawl entry page + linked pages
+                            )
+                            
+                            if website_content:
+                                logger.info(f"[Website {index+1}/{len(selected_websites)}] ✓ Crawled {len(website_content)} pages from {domain}")
+                                return website_content
+                            else:
+                                logger.warning(f"[Website {index+1}/{len(selected_websites)}] ✗ No content crawled from {domain}")
+                                return []
+                        except Exception as e:
+                            logger.error(f"[Website {index+1}/{len(selected_websites)}] ✗ Error crawling {domain}: {str(e)}")
+                            return []
+                    
+                    # Create tasks for all websites
+                    tasks = [crawl_single_website(website, i) for i, website in enumerate(selected_websites)]
+                    
+                    # Execute all website crawls in parallel
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+                    
+                    # Collect all results
+                    for i, result in enumerate(results):
+                        if isinstance(result, Exception):
+                            logger.error(f"Exception during crawl of website {selected_websites[i]['domain']}: {str(result)}")
+                        elif isinstance(result, list):
+                            crawled_content.extend(result)
+                    
+                    logger.info(f"Completed parallel crawl: {len(crawled_content)} total pages from {len(selected_websites)} websites")
+                    
                 finally:
-                    loop.close()
-                    # Clear the event loop from thread-local storage
-                    asyncio.set_event_loop(None)
+                    # Always clean up, even if crawling failed
+                    try:
+                        await web_crawler.close()
+                    except Exception as e:
+                        # Cleanup errors are non-critical - browser processes will be cleaned up by OS
+                        logger.debug(f"Non-critical cleanup error (browser will auto-cleanup): {str(e)}")
+            
+            try:
+                loop.run_until_complete(crawl_all_websites())
+            finally:
+                loop.close()
+                # Clear the event loop from thread-local storage
+                asyncio.set_event_loop(None)
             
             if not crawled_content:
-                logger.warning(f"No crawled content retrieved from {len(urls)} URLs")
+                logger.warning(f"No crawled content retrieved from {len(selected_websites)} websites")
                 return jsonify({
-                    'error': 'No content could be retrieved from the provided URLs. The websites may be unreachable or blocking crawlers.',
+                    'error': 'No content could be retrieved from the selected websites. The websites may be unreachable or blocking crawlers.',
                     'query': query,
                     'conversation_id': conversation_id,
-                    'urls_attempted': urls,
-                    'crawled_websites': crawled_websites if 'crawled_websites' in locals() else []
+                    'websites_attempted': [w['domain'] for w in selected_websites],
+                    'crawled_websites': []
                 }), 200
             
-            # Extract unique crawled URLs with titles for display
+            # Extract unique crawled pages with titles for display
             crawled_websites = []
             seen_urls = set()
+            domain_to_info = {}  # Track domain info
             for content in crawled_content:
                 url = content.get('url', '')
+                domain = content.get('domain', '')
                 if url and url not in seen_urls:
                     seen_urls.add(url)
                     crawled_websites.append({
                         'url': url,
                         'title': content.get('title', ''),
-                        'domain': content.get('domain', '')
+                        'domain': domain
                     })
+                    # Track domain info
+                    if domain not in domain_to_info:
+                        domain_to_info[domain] = {
+                            'domain': domain,
+                            'pages_crawled': 0,
+                            'entry_url': url  # First URL seen for this domain
+                        }
+                    domain_to_info[domain]['pages_crawled'] += 1
+            
+            # Create summary of crawled websites (domains) with page counts
+            website_summary = []
+            for domain, info in domain_to_info.items():
+                website_summary.append({
+                    'domain': domain,
+                    'entry_url': info['entry_url'],
+                    'pages_crawled': info['pages_crawled']
+                })
             
             # Process citations: score, format, deduplicate
             logger.info(f"Processing {len(crawled_content)} citations...")
@@ -673,10 +779,10 @@ def research():
             # Add conversation history
             messages.extend(conversations[conversation_id])
             
-            # Build website list for context
+            # Build website summary for context
             website_list = []
-            for i, site in enumerate(crawled_websites, 1):
-                website_list.append(f"[Website {i}] {site['title']} - {site['url']}")
+            for i, site in enumerate(website_summary, 1):
+                website_list.append(f"[Website {i}] {site['domain']} ({site['pages_crawled']} pages crawled)")
             websites_context = "\n".join(website_list) if website_list else ""
             
             # Add current query with context
@@ -708,15 +814,28 @@ def research():
             if len(conversations[conversation_id]) > 20:
                 conversations[conversation_id] = conversations[conversation_id][-20:]
             
+            # Prepare selected websites info for frontend display
+            selected_websites_info = [
+                {
+                    'domain': w['domain'],
+                    'title': w.get('title', w['domain']),
+                    'entry_url': w['entry_url']
+                }
+                for w in selected_websites
+            ]
+            
             # Return response with citations and crawled websites
             response_data = {
                 'answer': answer,
                 'citations': citations,
-                'crawled_websites': crawled_websites,  # List of URLs that were crawled
+                'crawled_websites': crawled_websites,  # List of pages that were crawled
+                'website_summary': website_summary,  # Summary of websites with page counts
+                'selected_websites': selected_websites_info,  # Info about websites selected for crawling
                 'query': query,
                 'conversation_id': conversation_id,
                 'message_count': len(conversations[conversation_id]),
-                'citations_count': len(citations)
+                'citations_count': len(citations),
+                'total_pages_crawled': len(crawled_websites)
             }
             logger.info(f"Research response: answer_length={len(answer)}, citations={len(citations)}, websites={len(crawled_websites)}")
             return jsonify(response_data), 200

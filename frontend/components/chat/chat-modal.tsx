@@ -34,12 +34,18 @@ export function ChatModal({ isOpen, onClose }: ChatModalProps) {
     if (filesChanged) {
       prevFilesRef.current = files;
       setUploadedFiles(files);
-      // Show panel if we have files OR citations
-      setShowFilesPanel(prev => {
-        const hasFiles = files.length > 0;
-        const hasCitations = prevCitationsRef.current.length > 0;
-        return hasFiles || hasCitations;
-      });
+      
+      // Calculate actual sources: PDF files + document citations only (not web citations)
+      const pdfFiles = files.filter(f => 
+        f.file.type === 'application/pdf' || f.file.name.toLowerCase().endsWith('.pdf')
+      );
+      const documentCitations = prevCitationsRef.current.filter(c => 
+        c.type === 'document' || (!c.type && c.domain === 'Internal Document')
+      );
+      const hasActualSources = pdfFiles.length > 0 || documentCitations.length > 0;
+      
+      // Show panel only if we have actual document sources to display
+      setShowFilesPanel(hasActualSources);
     }
   }, []);
 
@@ -54,12 +60,18 @@ export function ChatModal({ isOpen, onClose }: ChatModalProps) {
     if (citationsChanged) {
       prevCitationsRef.current = newCitations;
       setCitations(newCitations);
-      // Show panel if we have files OR citations
-      setShowFilesPanel(prev => {
-        const hasFiles = prevFilesRef.current.length > 0;
-        const hasCitations = newCitations.length > 0;
-        return hasFiles || hasCitations;
-      });
+      
+      // Calculate actual sources: PDF files + document citations only (not web citations)
+      const pdfFiles = prevFilesRef.current.filter(f => 
+        f.file.type === 'application/pdf' || f.file.name.toLowerCase().endsWith('.pdf')
+      );
+      const documentCitations = newCitations.filter(c => 
+        c.type === 'document' || (!c.type && c.domain === 'Internal Document')
+      );
+      const hasActualSources = pdfFiles.length > 0 || documentCitations.length > 0;
+      
+      // Show panel only if we have actual document sources to display
+      setShowFilesPanel(hasActualSources);
     }
   }, []);
 

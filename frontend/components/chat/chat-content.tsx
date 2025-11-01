@@ -8,6 +8,7 @@ import { CitationList, type Citation } from '@/components/citations/citation-lis
 import { createHighlightUrl } from '@/components/citations/citation-highlighter';
 import { InlineCitations } from '@/components/citations/inline-citations';
 import { CrawledWebsitesList } from '@/components/crawled-websites/crawled-websites-list';
+import { CrawlingWebsites, type CrawlingWebsite } from '@/components/chat/crawling-websites';
 import type { FileWithMetadata } from './files-panel';
 
 interface ChatContentProps {
@@ -39,6 +40,8 @@ export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitat
   const [uploading, setUploading] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [researchMode, setResearchMode] = useState(false);
+  const [crawlingWebsites, setCrawlingWebsites] = useState<CrawlingWebsite[]>([]);
+  const [isCrawling, setIsCrawling] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const messageIdCounter = useRef<number>(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -190,6 +193,11 @@ export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitat
       // URLs will be automatically selected by the backend based on the query
       if (researchMode) {
         console.log('Research mode enabled - calling /api/research endpoint');
+        
+        // Show crawling indicator
+        setIsCrawling(true);
+        setCrawlingWebsites([]);
+        
         try {
           const response = await fetch('/api/research', {
             method: 'POST',
@@ -208,6 +216,7 @@ export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitat
           if (!response.ok) {
             const errorData = await response.json().catch(() => ({ error: response.statusText }));
             console.error('Research endpoint error:', errorData);
+            setIsCrawling(false);
             // Show error but don't fall back silently - let user know
             messageIdCounter.current += 1;
             const errorMsg: Message = {
@@ -220,6 +229,12 @@ export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitat
             return;
           } else {
             const data = await response.json();
+            
+            // Update crawling websites from response
+            if (data.selected_websites && Array.isArray(data.selected_websites)) {
+              setCrawlingWebsites(data.selected_websites);
+            }
+            setIsCrawling(false);
             console.log('Research response data:', {
               answerLength: data.answer?.length,
               citationsCount: data.citations?.length,
@@ -475,13 +490,24 @@ export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitat
           ))}
 
           {streaming && (
-            <div className="flex gap-4 justify-start">
-              <div className="px-4 py-3 bg-gray-100 rounded-2xl rounded-bl-sm">
-                <div className="flex items-center gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin text-gray-600" />
-                  <span className="text-sm text-gray-600">Processing...</span>
+            <div className="flex flex-col gap-3">
+              <div className="flex gap-4 justify-start">
+                <div className="px-4 py-3 bg-gray-100 rounded-2xl rounded-bl-sm">
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin text-gray-600" />
+                    <span className="text-sm text-gray-600">Processing...</span>
+                  </div>
                 </div>
               </div>
+              {/* Show crawling websites if in research mode */}
+              {researchMode && (isCrawling || crawlingWebsites.length > 0) && (
+                <div className="ml-4">
+                  <CrawlingWebsites 
+                    websites={crawlingWebsites} 
+                    isCrawling={isCrawling}
+                  />
+                </div>
+              )}
             </div>
           )}
         </div>

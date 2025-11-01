@@ -290,6 +290,207 @@ class WebCrawlerService:
         logger.info(f"Crawled {len(valid_results)}/{len(urls_to_crawl)} URLs successfully (parallel execution)")
         return valid_results
     
+    async def crawl_website_multi_page(
+        self, 
+        entry_url: str, 
+        query: str = "", 
+        max_pages: int = 10,
+        depth: int = 2
+    ) -> List[Dict[str, Any]]:
+        """
+        Crawl multiple pages from a website starting from an entry URL.
+        Uses crawl4ai's link discovery capabilities to find and crawl multiple related pages.
+        
+        Args:
+            entry_url: Starting URL for crawling
+            query: Query string for context (optional, used to prioritize relevant pages)
+            max_pages: Maximum number of pages to crawl from this website
+            depth: Maximum depth to crawl (1 = only entry page, 2 = entry + linked pages, etc.)
+            
+        Returns:
+            List of extracted content dictionaries from multiple pages
+        """
+        if not self._is_allowed_domain(entry_url):
+            logger.warning(f"Domain not allowed for URL: {entry_url}")
+            return []
+        
+        try:
+            domain = self._extract_domain(entry_url)
+            logger.info(f"Starting multi-page crawl of website: {domain} (entry: {entry_url}, max_pages: {max_pages}, depth: {depth})")
+            
+            # Get or initialize crawler
+            crawler = self._get_crawler()
+            
+            # Track crawled URLs to avoid duplicates
+            crawled_urls = set()
+            all_results = []
+            
+            # Start with entry URL
+            urls_to_crawl = [entry_url]
+            current_depth = 0
+            
+            while urls_to_crawl and current_depth < depth and len(all_results) < max_pages:
+                # Get URLs to crawl in this batch (up to max_pages or 10 parallel, whichever is smaller)
+                batch_urls = [url for url in urls_to_crawl[:max_pages - len(all_results)] if url not in crawled_urls]
+                
+                if not batch_urls:
+                    break
+                
+                # Crawl current batch of URLs in parallel (up to 10 concurrent requests)
+                max_concurrent = min(10, len(batch_urls), max_pages - len(all_results))
+                
+                logger.info(f"[Depth {current_depth}] Crawling {len(batch_urls)} URLs in parallel (max {max_concurrent} concurrent)")
+                
+                # Create tasks for parallel crawling
+                async def crawl_single_with_tracking(url: str) -> Optional[Dict[str, Any]]:
+                    """Crawl a single URL with tracking"""
+                    try:
+                        logger.info(f"[Depth {current_depth}] Starting: {url}")
+                        content = await self.extract_content(url)
+                        if content:
+                            logger.info(f"[Depth {current_depth}] ✓ Completed: {url} (Title: {content.get('title', 'N/A')})")
+                        else:
+                            logger.warning(f"[Depth {current_depth}] ✗ Failed: {url}")
+                        return content
+                    except Exception as e:
+                        logger.error(f"[Depth {current_depth}] ✗ Error crawling {url}: {str(e)}")
+                        return None
+                
+                # Create semaphore to limit concurrent requests
+                semaphore = asyncio.Semaphore(max_concurrent)
+                
+                async def crawl_with_semaphore(url: str) -> Optional[Dict[str, Any]]:
+                    """Crawl with semaphore to limit concurrency"""
+                    async with semaphore:
+                        return await crawl_single_with_tracking(url)
+                
+                # Execute all crawls in parallel with concurrency limit
+                tasks = [crawl_with_semaphore(url) for url in batch_urls]
+                batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+                
+                # Process results
+                for i, result in enumerate(batch_results):
+                    if isinstance(result, Exception):
+                        logger.error(f"Exception during crawl of {batch_urls[i]}: {str(result)}")
+                        continue
+                    
+                    if result is not None:
+                        url = batch_urls[i]
+                        crawled_urls.add(url)
+                        all_results.append(result)
+                        logger.info(f"✓ Total crawled: {len(all_results)}/{max_pages} pages")
+                
+                # If we have more capacity, discover new links from crawled pages
+                if len(all_results) < max_pages and current_depth < depth - 1:
+                    # Try to extract links from the most recent pages
+                    new_urls = await self._extract_links_from_content(
+                        crawler=crawler,
+                        entry_url=entry_url,
+                        crawled_content=all_results[-min(5, len(all_results)):],  # Check last 5 pages
+                        domain=domain,
+                        max_links=20
+                    )
+                    
+                    # Filter out already crawled URLs and ensure they're from the same domain
+                    urls_to_crawl = [
+                        url for url in new_urls 
+                        if url not in crawled_urls 
+                        and self._extract_domain(url) == domain
+                        and self._is_allowed_domain(url)
+                    ][:max_pages - len(all_results)]
+                    
+                    if urls_to_crawl:
+                        logger.info(f"Discovered {len(urls_to_crawl)} new URLs for depth {current_depth + 1}")
+                
+                current_depth += 1
+            
+            logger.info(f"Completed multi-page crawl: {len(all_results)} pages from {domain}")
+            return all_results
+            
+        except Exception as e:
+            logger.error(f"Error in multi-page crawl of {entry_url}: {str(e)}")
+            return []
+    
+    async def _extract_links_from_content(
+        self,
+        crawler,
+        entry_url: str,
+        crawled_content: List[Dict[str, Any]],
+        domain: str,
+        max_links: int = 20
+    ) -> List[str]:
+        """
+        Extract links from crawled content that are relevant to the domain.
+        
+        Args:
+            crawler: The crawl4ai crawler instance
+            entry_url: Original entry URL
+            crawled_content: List of crawled content dictionaries
+            domain: Domain to filter links by
+            max_links: Maximum number of links to return
+            
+        Returns:
+            List of discovered URLs
+        """
+        discovered_urls = set()
+        
+        try:
+            # Try to extract links from crawl4ai result objects
+            for content in crawled_content[-3:]:  # Check last 3 pages
+                # Try to get HTML from the original crawl result
+                # We'll need to crawl again to get links, or parse from metadata
+                pass
+            
+            # Crawl entry URL to get links
+            try:
+                result = await crawler.arun(url=entry_url) if hasattr(crawler, 'arun') else await crawler.crawl(url=entry_url)
+                
+                # Extract links from result
+                links = []
+                if isinstance(result, dict):
+                    links = result.get('links', []) or []
+                    # Also try to extract from HTML
+                    html = result.get('html', '') or result.get('cleaned_html', '')
+                elif hasattr(result, 'links'):
+                    links = result.links if isinstance(result.links, list) else []
+                    html = getattr(result, 'html', '') or getattr(result, 'cleaned_html', '')
+                else:
+                    html = ''
+                
+                # Parse HTML for links if available
+                if html:
+                    try:
+                        from bs4 import BeautifulSoup
+                        soup = BeautifulSoup(html, 'html.parser')
+                        for a_tag in soup.find_all('a', href=True):
+                            href = a_tag.get('href', '')
+                            if href:
+                                # Convert relative URLs to absolute
+                                from urllib.parse import urljoin, urlparse
+                                absolute_url = urljoin(entry_url, href)
+                                # Extract just the URL path if it's a valid URL
+                                parsed = urlparse(absolute_url)
+                                if parsed.scheme and parsed.netloc:
+                                    links.append(absolute_url)
+                    except ImportError:
+                        logger.debug("BeautifulSoup not available for HTML parsing")
+                    except Exception as e:
+                        logger.debug(f"Error parsing HTML for links: {e}")
+                
+                # Filter links by domain
+                for link in links:
+                    if isinstance(link, str) and link.startswith('http'):
+                        link_domain = self._extract_domain(link)
+                        if link_domain == domain:
+                            discovered_urls.add(link)
+            except Exception as e:
+                logger.debug(f"Could not extract links from entry URL: {e}")
+            
+        except Exception as e:
+            logger.debug(f"Error extracting links: {e}")
+        
+        return list(discovered_urls)[:max_links]
+    
     def generate_search_urls(self, query: str, base_urls: Optional[List[str]] = None) -> List[str]:
         """
         Generate URLs to crawl based on query
