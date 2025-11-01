@@ -9,8 +9,10 @@ export async function POST(req: Request) {
       return new Response('Invalid request: query required', { status: 400 });
     }
 
-    if (!body.urls || !Array.isArray(body.urls) || body.urls.length === 0) {
-      return new Response('Invalid request: urls array required', { status: 400 });
+    // URLs are optional - backend will auto-select if not provided
+    // Ensure urls is an array if provided, or default to empty array
+    if (body.urls !== undefined && (!Array.isArray(body.urls))) {
+      return new Response('Invalid request: urls must be an array', { status: 400 });
     }
 
     // Send request to backend research endpoint

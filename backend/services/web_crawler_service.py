@@ -2,6 +2,7 @@ import os
 import re
 import time
 import logging
+import asyncio
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from urllib.parse import urlparse
@@ -149,7 +150,8 @@ class WebCrawlerService:
             return None
         
         try:
-            logger.info(f"Crawling URL: {url}")
+            domain = self._extract_domain(url)
+            logger.info(f"Crawling website: {url} (domain: {domain})")
             
             # Get or initialize crawler
             crawler = self._get_crawler()
@@ -241,7 +243,7 @@ class WebCrawlerService:
     
     async def crawl_urls(self, urls: List[str], query: str = "") -> List[Dict[str, Any]]:
         """
-        Crawl multiple URLs with rate limiting
+        Crawl multiple URLs in parallel using asyncio
         
         Args:
             urls: List of URLs to crawl
@@ -250,28 +252,43 @@ class WebCrawlerService:
         Returns:
             List of extracted content dictionaries
         """
-        results = []
         urls_to_crawl = urls[:self.max_pages]  # Limit to max_pages
         
-        logger.info(f"Starting to crawl {len(urls_to_crawl)} URLs (query: {query})")
+        logger.info(f"Starting parallel crawl of {len(urls_to_crawl)} URLs (query: {query})")
+        logger.info(f"URLs to crawl: {urls_to_crawl}")
         
-        for i, url in enumerate(urls_to_crawl):
+        # Create tasks for parallel crawling
+        async def crawl_single(url: str, index: int) -> Optional[Dict[str, Any]]:
+            """Crawl a single URL with error handling"""
             try:
-                # Add delay between requests (except first)
-                if i > 0:
-                    time.sleep(self.delay_between_requests)
-                
+                logger.info(f"[{index+1}/{len(urls_to_crawl)}] Starting parallel crawl: {url}")
                 content = await self.extract_content(url)
                 if content:
-                    results.append(content)
-                    logger.info(f"Successfully crawled {i+1}/{len(urls_to_crawl)}: {url}")
-                
+                    title = content.get('title', 'N/A')
+                    text_length = len(content.get('text', ''))
+                    logger.info(f"[{index+1}/{len(urls_to_crawl)}] ✓ Successfully crawled: {url} (Title: {title}, Content: {text_length} chars)")
+                    return content
+                else:
+                    logger.warning(f"[{index+1}/{len(urls_to_crawl)}] ✗ Failed to extract content from: {url}")
+                    return None
             except Exception as e:
-                logger.error(f"Error crawling {url}: {str(e)}")
-                continue
+                logger.error(f"[{index+1}/{len(urls_to_crawl)}] ✗ Error crawling {url}: {str(e)}")
+                return None
         
-        logger.info(f"Crawled {len(results)}/{len(urls_to_crawl)} URLs successfully")
-        return results
+        # Execute all crawls in parallel
+        tasks = [crawl_single(url, i) for i, url in enumerate(urls_to_crawl)]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Filter out None values and exceptions
+        valid_results = []
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                logger.error(f"Exception during crawl of {urls_to_crawl[i]}: {str(result)}")
+            elif result is not None:
+                valid_results.append(result)
+        
+        logger.info(f"Crawled {len(valid_results)}/{len(urls_to_crawl)} URLs successfully (parallel execution)")
+        return valid_results
     
     def generate_search_urls(self, query: str, base_urls: Optional[List[str]] = None) -> List[str]:
         """

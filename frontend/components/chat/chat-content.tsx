@@ -6,6 +6,7 @@ import { Loader2, Globe } from 'lucide-react';
 import { useRef, useEffect, useState } from 'react';
 import { CitationList, type Citation } from '@/components/citations/citation-list';
 import { createHighlightUrl } from '@/components/citations/citation-highlighter';
+import { CrawledWebsitesList } from '@/components/crawled-websites/crawled-websites-list';
 import type { FileWithMetadata } from './files-panel';
 
 interface ChatContentProps {
@@ -13,11 +14,18 @@ interface ChatContentProps {
   onFilesChange: (files: FileWithMetadata[]) => void;
 }
 
+interface CrawledWebsite {
+  url: string;
+  title?: string;
+  domain?: string;
+}
+
 interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   citations?: Citation[];
+  crawledWebsites?: CrawledWebsite[];
 }
 
 export function ChatContent({ onClose, onFilesChange }: ChatContentProps) {
@@ -125,6 +133,7 @@ export function ChatContent({ onClose, onFilesChange }: ChatContentProps) {
       // If research mode is enabled, try research endpoint
       // URLs will be automatically selected by the backend based on the query
       if (researchMode) {
+        console.log('Research mode enabled - calling /api/research endpoint');
         try {
           const response = await fetch('/api/research', {
             method: 'POST',
@@ -138,25 +147,53 @@ export function ChatContent({ onClose, onFilesChange }: ChatContentProps) {
             }),
           });
 
+          console.log('Research response status:', response.status, response.ok);
+
           if (!response.ok) {
             const errorData = await response.json().catch(() => ({ error: response.statusText }));
-            throw new Error(errorData.error || `Failed to get research response (${response.status})`);
+            console.error('Research endpoint error:', errorData);
+            // Show error but don't fall back silently - let user know
+            messageIdCounter.current += 1;
+            const errorMsg: Message = {
+              id: `error-${messageIdCounter.current}`,
+              role: 'assistant',
+              content: `Research error: ${errorData.error || `Failed to get research response (${response.status})`}. Please try again or disable web search.`,
+            };
+            setMessages(prev => [...prev, errorMsg]);
+            setStreaming(false);
+            return;
           } else {
             const data = await response.json();
+            console.log('Research response data:', { 
+              answerLength: data.answer?.length,
+              citationsCount: data.citations?.length,
+              crawledWebsitesCount: data.crawled_websites?.length,
+              crawledWebsites: data.crawled_websites
+            });
             messageIdCounter.current += 1;
             const assistantMessage: Message = {
               id: `assistant-${messageIdCounter.current}`,
               role: 'assistant',
               content: data.answer || 'No answer received.',
               citations: data.citations || [],
+              crawledWebsites: data.crawled_websites || [],
             };
             setMessages(prev => [...prev, assistantMessage]);
             setStreaming(false);
             return;
           }
         } catch (error) {
-          // If research fails, fall back to regular chat
-          console.log('Research mode failed, falling back to regular chat:', error);
+          // If research fails, show error message
+          console.error('Research mode failed:', error);
+          messageIdCounter.current += 1;
+          const errorMsg: Message = {
+            id: `error-${messageIdCounter.current}`,
+            role: 'assistant',
+            content: `Research error: ${error instanceof Error ? error.message : 'Unknown error'}. Falling back to regular chat.`,
+          };
+          setMessages(prev => [...prev, errorMsg]);
+          setStreaming(false);
+          // Continue to regular chat as fallback
         }
       }
 
@@ -341,6 +378,9 @@ export function ChatContent({ onClose, onFilesChange }: ChatContentProps) {
                     }}
                   />
                 )}
+                {message.role === 'assistant' && message.crawledWebsites && message.crawledWebsites.length > 0 && (
+                  <CrawledWebsitesList websites={message.crawledWebsites} />
+                )}
               </div>
             </div>
           ))}
@@ -392,21 +432,25 @@ export function ChatContent({ onClose, onFilesChange }: ChatContentProps) {
             </Button>
 
             {/* Web Search Toggle */}
-            <Button
-              type="button"
-              variant={researchMode ? "default" : "outline"}
-              size="sm"
-              onClick={() => setResearchMode(!researchMode)}
-              disabled={streaming || uploading}
-              className={`flex items-center gap-2 h-8 px-3 rounded-lg ${
-                researchMode 
-                  ? 'bg-gray-900 text-white hover:bg-gray-800' 
-                  : 'border border-gray-300 hover:bg-gray-50'
-              }`}
-            >
-              <Globe className="h-3.5 w-3.5" />
-              <span className="text-xs font-medium">Web</span>
-            </Button>
+          <Button
+            type="button"
+            variant={researchMode ? "default" : "outline"}
+            size="sm"
+            onClick={() => {
+              console.log('Web button clicked, researchMode:', researchMode);
+              setResearchMode(!researchMode);
+            }}
+            disabled={streaming || uploading}
+            className={`flex items-center gap-2 h-8 px-3 rounded-lg ${
+              researchMode 
+                ? 'bg-gray-900 text-white hover:bg-gray-800' 
+                : 'border border-gray-300 hover:bg-gray-50'
+            }`}
+            title={researchMode ? 'Web search enabled - will crawl websites' : 'Enable web search'}
+          >
+            <Globe className="h-3.5 w-3.5" />
+            <span className="text-xs font-medium">Web</span>
+          </Button>
           </div>
           
           {uploadedFiles.length > 0 && (

@@ -24,7 +24,7 @@ export default function Home() {
       </header>
 
       {/* Main content - completely white */}
-      <main className="h-screen bg-white">
+      <main className="h-full bg-white">
       <div className="flex justify-center items-center gap-10 py-16">
         <img
           src="/milvum-logo.png"

@@ -4,14 +4,19 @@ import json
 from werkzeug.utils import secure_filename
 import os
 import asyncio
+from dotenv import load_dotenv
 from services.document_processor import DocumentProcessor
 from services.rag_service import RAGService
 from services.llm_service import EmbeddingService, ChatService
 from services.citation_service import CitationService
 from services.url_selector import URLSelector
+from services.groq_service import GroqService
 import logging
 from datetime import datetime
 import uuid
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -40,10 +45,11 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 # Initialize services
 embedding_service = EmbeddingService()
 chat_service = ChatService()
+groq_service = GroqService()  # Fast model for URL classification
 doc_processor = DocumentProcessor()
 rag_service = RAGService(embedding_service)
 citation_service = CitationService(embedding_service)
-url_selector = URLSelector(chat_service)
+url_selector = URLSelector(groq_service)  # Use Groq for fast URL selection
 
 # Web crawler will be initialized per request (to avoid keeping browser open)
 def get_web_crawler():
@@ -135,22 +141,41 @@ def chat():
         
         logger.info(f"Processing query in conversation {conversation_id}: {query}")
         
+        # Expand query for better matching (e.g., "woo" -> also search for "WOB", "Wet Openbaarheid")
+        query_expanded = query
+        query_lower = query.lower()
+        if "woo" in query_lower or "wob" in query_lower:
+            query_expanded = query + " WOB Wet Openbaarheid van Bestuur"
+        elif "wet openbaarheid" in query_lower:
+            query_expanded = query + " WOB Woo"
+        
         # Get relevant documents from vector search with reranking
         # Retrieve 30 documents from Pinecone, then rerank to top 5
+        logger.info(f"Original query: {query}, Expanded query: {query_expanded}")
         search_results = rag_service.query(
-            query=query, 
+            query=query_expanded,  # Use expanded query for better retrieval
             top_k=5,        # Final number of documents after reranking
             initial_k=30    # Initial retrieval from Pinecone
         )
         
+        # Log retrieved documents for debugging
+        logger.info(f"Retrieved {len(search_results['sources'])} documents")
+        if search_results['sources']:
+            logger.info(f"Top document preview: {search_results['sources'][0].get('text', '')[:200]}...")
+            logger.info(f"Top document score: {search_results['sources'][0].get('score', 'N/A')}")
+        
         # Build context from retrieved documents
-        context = "\n\n".join([doc.get('text', '') for doc in search_results['sources']])
+        context_parts = []
+        for i, doc in enumerate(search_results['sources'], 1):
+            doc_text = doc.get('text', '')
+            context_parts.append(f"[Document {i}]\n{doc_text}")
+        context = "\n\n".join(context_parts)
         
         # Build conversation history for LLM
         messages = [
             {
                 "role": "system",
-                "content": "You are a helpful assistant. Answer the user's question based on the provided context and conversation history. If the context doesn't contain relevant information, say so. Maintain context from previous messages in the conversation."
+                "content": "You are a helpful assistant that answers questions based on provided government documents. Use the context documents to answer the user's question. If the documents contain partial or related information, use it to provide as helpful an answer as possible. Only say information is not available if the context is completely unrelated to the question. Be thorough and extract all relevant information from the context."
             }
         ]
         
@@ -188,12 +213,19 @@ def chat():
                 yield f"data: {json.dumps({'type': 'error', 'error': error_message})}\n\n"
                 yield f"data: [DONE]\n\n"
         # Add current query with context
+        # Only add context if we have documents
+        if context.strip():
+            user_content = f"Context from government documents:\n\n{context}\n\nUser question: {query}\n\nPlease answer the user's question based on the documents provided above. Extract and synthesize information from the documents to provide a comprehensive answer."
+        else:
+            user_content = f"User question: {query}\n\nNo relevant documents were found in the knowledge base. Please let the user know that you don't have information about this topic."
+        
         messages.append({
             "role": "user",
-            "content": f"Context from documents:\n{context}\n\nUser question: {query}"
+            "content": user_content
         })
         
         # Generate answer using ChatService
+        logger.info("Generating LLM answer with context...")
         answer = chat_service.chat(messages)
         
         # Store this exchange in conversation history
@@ -251,9 +283,26 @@ def research():
         try:
             # Generate or use provided URLs
             if not urls:
-                # Automatically select relevant URLs based on the query
-                logger.info(f"No URLs provided, selecting relevant URLs for query: {query[:100]}...")
-                urls = url_selector.select_urls(query, max_urls=max_results + 2)  # Get a few extra URLs for safety
+                # Automatically select relevant URLs based on the query using Groq
+                logger.info(f"No URLs provided, selecting relevant URLs using Groq for query: {query[:100]}...")
+                try:
+                    urls = url_selector.select_urls(query, max_urls=max_results + 2)  # Get a few extra URLs for safety
+                except ValueError as e:
+                    # Groq-specific errors (API key issues, etc.)
+                    error_msg = str(e)
+                    logger.error(f"Groq URL selection failed: {error_msg}")
+                    return jsonify({
+                        'error': f'URL selection failed: {error_msg}. Please ensure GROQ_API_KEY is set in your .env file.',
+                        'query': query,
+                        'conversation_id': conversation_id
+                    }), 400
+                except Exception as e:
+                    logger.error(f"Unexpected error in URL selection: {str(e)}", exc_info=True)
+                    return jsonify({
+                        'error': f'Failed to select URLs for crawling: {str(e)}',
+                        'query': query,
+                        'conversation_id': conversation_id
+                    }), 500
                 
                 if not urls:
                     return jsonify({
@@ -262,7 +311,9 @@ def research():
                         'conversation_id': conversation_id
                     }), 200
                 
-                logger.info(f"Selected {len(urls)} URLs automatically: {urls[:3]}...")
+                logger.info(f"Selected {len(urls)} URLs automatically")
+                for i, url in enumerate(urls, 1):
+                    logger.info(f"  [{i}] {url}")
             
             # Filter URLs by allowed domains if domain_filter provided
             if domain_filter:
@@ -270,7 +321,9 @@ def research():
             
             # Crawl URLs
             # Use a single event loop for both crawling and cleanup to avoid loop conflicts
-            logger.info(f"Crawling {len(urls)} URLs...")
+            logger.info(f"Starting to crawl {len(urls)} URLs for query: '{query[:100]}'...")
+            for i, url in enumerate(urls, 1):
+                logger.info(f"  Will crawl [{i}/{len(urls)}]: {url}")
             
             # Create event loop for this request
             loop = asyncio.new_event_loop()
@@ -293,11 +346,27 @@ def research():
                     asyncio.set_event_loop(None)
             
             if not crawled_content:
+                logger.warning(f"No crawled content retrieved from {len(urls)} URLs")
                 return jsonify({
-                    'error': 'No content could be retrieved from the provided URLs.',
+                    'error': 'No content could be retrieved from the provided URLs. The websites may be unreachable or blocking crawlers.',
                     'query': query,
-                    'conversation_id': conversation_id
+                    'conversation_id': conversation_id,
+                    'urls_attempted': urls,
+                    'crawled_websites': crawled_websites if 'crawled_websites' in locals() else []
                 }), 200
+            
+            # Extract unique crawled URLs with titles for display
+            crawled_websites = []
+            seen_urls = set()
+            for content in crawled_content:
+                url = content.get('url', '')
+                if url and url not in seen_urls:
+                    seen_urls.add(url)
+                    crawled_websites.append({
+                        'url': url,
+                        'title': content.get('title', ''),
+                        'domain': content.get('domain', '')
+                    })
             
             # Process citations: score, format, deduplicate
             logger.info(f"Processing {len(crawled_content)} citations...")
@@ -327,10 +396,21 @@ def research():
             # Add conversation history
             messages.extend(conversations[conversation_id])
             
+            # Build website list for context
+            website_list = []
+            for i, site in enumerate(crawled_websites, 1):
+                website_list.append(f"[Website {i}] {site['title']} - {site['url']}")
+            websites_context = "\n".join(website_list) if website_list else ""
+            
             # Add current query with context
+            user_content = f"Web Sources Context:\n{context}\n\n"
+            if websites_context:
+                user_content += f"Websites crawled:\n{websites_context}\n\n"
+            user_content += f"User question: {query}\n\nProvide an answer based on the sources above, citing them with [1], [2], etc. Also mention which websites were crawled at the end of your answer."
+            
             messages.append({
                 "role": "user",
-                "content": f"Web Sources Context:\n{context}\n\nUser question: {query}\n\nProvide an answer based on the sources above, citing them with [1], [2], etc."
+                "content": user_content
             })
             
             # Generate answer using ChatService
@@ -351,22 +431,25 @@ def research():
             if len(conversations[conversation_id]) > 20:
                 conversations[conversation_id] = conversations[conversation_id][-20:]
             
-            # Return response with citations
-            return jsonify({
+            # Return response with citations and crawled websites
+            response_data = {
                 'answer': answer,
                 'citations': citations,
+                'crawled_websites': crawled_websites,  # List of URLs that were crawled
                 'query': query,
                 'conversation_id': conversation_id,
                 'message_count': len(conversations[conversation_id]),
                 'citations_count': len(citations)
-            }), 200
+            }
+            logger.info(f"Research response: answer_length={len(answer)}, citations={len(citations)}, websites={len(crawled_websites)}")
+            return jsonify(response_data), 200
         
         except Exception as e:
-            logger.error(f"Error in research: {str(e)}")
+            logger.error(f"Error in research: {str(e)}", exc_info=True)
             return jsonify({'error': f'Research error: {str(e)}'}), 500
     
     except Exception as e:
-        logger.error(f"Error processing research request: {str(e)}")
+        logger.error(f"Error processing research request: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/documents', methods=['GET'])
