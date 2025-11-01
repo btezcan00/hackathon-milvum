@@ -144,8 +144,8 @@ export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitat
         });
 
         if (!response.ok) {
-          const errorData = await response.json().catch(() => ({ error: 'Upload failed' }));
-          throw new Error(errorData.error || `Failed to upload files`);
+          const errorData = await response.json().catch(() => ({ error: 'Upload mislukt' }));
+          throw new Error(errorData.error || `Bestanden uploaden mislukt`);
         }
 
         const result = await response.json();
@@ -165,7 +165,7 @@ export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitat
         }
       } catch (error) {
         console.error('Upload error:', error);
-        alert(error instanceof Error ? error.message : 'An error occurred while uploading files. Please try again.');
+        alert(error instanceof Error ? error.message : 'Er is een fout opgetreden bij het uploaden van bestanden. Probeer het opnieuw.');
       } finally {
         setUploading(false);
       }
@@ -230,7 +230,7 @@ export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitat
             const errorMsg: Message = {
               id: `error-${messageIdCounter.current}`,
               role: 'assistant',
-              content: `Research error: ${errorData.error || `Failed to get research response (${response.status})`}. Please try again or disable web search.`,
+              content: `Onderzoeksfout: ${errorData.error || `Kan geen onderzoeksantwoord krijgen (${response.status})`}. Probeer het opnieuw of schakel webzoeken uit.`,
             };
             setMessages(prev => [...prev, errorMsg]);
             setStreaming(false);
@@ -275,7 +275,7 @@ export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitat
           const errorMsg: Message = {
             id: `error-${messageIdCounter.current}`,
             role: 'assistant',
-            content: `Research error: ${error instanceof Error ? error.message : 'Unknown error'}. Falling back to regular chat.`,
+            content: `Onderzoeksfout: ${error instanceof Error ? error.message : 'Onbekende fout'}. Terugvallen op normale chat.`,
           };
           setMessages(prev => [...prev, errorMsg]);
           setStreaming(false);
@@ -295,7 +295,7 @@ export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitat
       });
 
       if (!response.ok) {
-        throw new Error('Failed to get response');
+        throw new Error('Kan geen antwoord krijgen');
       }
 
       // Check if response is streaming or JSON
@@ -306,7 +306,7 @@ export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitat
         const decoder = new TextDecoder();
 
         if (!reader) {
-          throw new Error('No response body');
+          throw new Error('Geen antwoordinhoud');
         }
 
         messageIdCounter.current += 1;
@@ -333,7 +333,7 @@ export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitat
               const data = line.slice(6);
               if (data === '[DONE]') {
                 if (!hasReceivedContent && !errorOccurred) {
-                  assistantMessage.content = 'No answer received. Please check your connection or try again.';
+                  assistantMessage.content = 'Geen antwoord ontvangen. Controleer uw verbinding of probeer het opnieuw.';
                   setMessages(prev => {
                     const newMessages = [...prev];
                     newMessages[newMessages.length - 1] = { ...assistantMessage };
@@ -348,7 +348,7 @@ export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitat
 
                 if (json.type === 'error') {
                   errorOccurred = true;
-                  assistantMessage.content = `Error: ${json.error || 'An error occurred'}`;
+                  assistantMessage.content = `Fout: ${json.error || 'Er is een fout opgetreden'}`;
                   setMessages(prev => {
                     const newMessages = [...prev];
                     newMessages[newMessages.length - 1] = { ...assistantMessage };
@@ -374,7 +374,7 @@ export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitat
         }
 
         if (!hasReceivedContent && !errorOccurred && assistantMessage.content === '') {
-          assistantMessage.content = 'No answer received from server.';
+          assistantMessage.content = 'Geen antwoord ontvangen van de server.';
           setMessages(prev => {
             const newMessages = [...prev];
             newMessages[newMessages.length - 1] = { ...assistantMessage };
@@ -402,14 +402,14 @@ export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitat
       }
     } catch (error) {
       console.error('Chat error:', error);
-      const errorMessage = error instanceof Error ? error.message : 'An error occurred. Please try again.';
+      const errorMessage = error instanceof Error ? error.message : 'Er is een fout opgetreden. Probeer het opnieuw.';
       alert(errorMessage);
 
       messageIdCounter.current += 1;
       const errorMsg: Message = {
         id: `error-${messageIdCounter.current}`,
         role: 'assistant',
-        content: `Error: ${errorMessage}`,
+        content: `Fout: ${errorMessage}`,
       };
       setMessages(prev => [...prev, errorMsg]);
     } finally {
@@ -443,10 +443,10 @@ export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitat
           {messages.length === 0 && (
             <div className="flex flex-col items-center justify-center py-16 text-center">
               <h3 className="text-lg font-medium text-gray-900 mb-2">
-                Start a conversation
+                Start een gesprek
               </h3>
               <p className="text-sm text-gray-600 max-w-md">
-                Ask questions about your uploaded documents to get started.
+                Stel vragen over uw geüploade documenten om te beginnen.
               </p>
             </div>
           )}
@@ -547,10 +547,10 @@ export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitat
               {uploading ? (
                 <>
                   <Loader2 className="h-3.5 w-3.5 animate-spin mr-2" />
-                  Uploading...
+                  Uploaden...
                 </>
               ) : (
-                'Upload Files'
+                'Bestanden uploaden'
               )}
             </Button>
 
@@ -577,7 +577,7 @@ export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitat
 
           {uploadedFiles.length > 0 && (
             <span className="text-xs text-gray-500">
-              {uploadedFiles.length} file{uploadedFiles.length > 1 ? 's' : ''}
+              {uploadedFiles.length} bestand{uploadedFiles.length > 1 ? 'en' : ''}
             </span>
           )}
         </div>
@@ -596,7 +596,7 @@ export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitat
             <Textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Type your message..."
+              placeholder="Typ uw bericht..."
               className="min-h-[60px] max-h-[120px] resize-none border-gray-300 focus:border-gray-900 rounded-xl"
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
@@ -618,7 +618,7 @@ export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitat
             {streaming ? (
               <Loader2 className="h-5 w-5 animate-spin" />
             ) : (
-              'Send'
+              'Verzenden'
             )}
           </Button>
         </form>

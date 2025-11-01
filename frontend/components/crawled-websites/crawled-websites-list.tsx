@@ -54,6 +54,7 @@ export function CrawledWebsitesList({ websites }: CrawledWebsitesListProps) {
           >
             <div className="w-6 h-6 flex-shrink-0 flex items-center justify-center">
               {faviconUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={faviconUrl}
                   alt={`${domainName} favicon`}

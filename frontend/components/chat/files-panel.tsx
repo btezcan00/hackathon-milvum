@@ -330,7 +330,6 @@ export function FilesPanel({ files, citations = [], selectedCitationUrl, onClose
                 {sources.map((source, index) => {
                   const isSelected = index === selectedSourceIndex;
                   const isFile = source.type === 'file';
-                  const isCitation = source.type === 'citation';
 
                   return (
                     <button
@@ -511,20 +510,20 @@ export function FilesPanel({ files, citations = [], selectedCitationUrl, onClose
                                   rel="noopener noreferrer"
                                   className="block px-6 py-3 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors text-center"
                                 >
-                                  {citation.url.includes('drive.google.com') ? 'Open in Google Drive' : 'View Document'}
+                                  {citation.url.includes('drive.google.com') ? 'Openen in Google Drive' : 'Document bekijken'}
                                 </a>
                               )}
                               {selectedSourceUrl && !citation.url?.startsWith('http') && (
                                 <div className="text-center">
                                   <p className="text-xs text-gray-400 mb-2">
-                                    Document is available in the uploaded files list.
+                                    Document is beschikbaar in de lijst met geüploade bestanden.
                                   </p>
                                 </div>
                               )}
                               {!selectedSourceUrl && !citation.url?.startsWith('http') && (
                                 <div className="text-center">
                                   <p className="text-xs text-gray-500 mb-2">
-                                    No preview available. Check console logs for debugging.
+                                    Geen voorbeeld beschikbaar. Controleer de console logs voor debugging.
                                   </p>
                                 </div>
                               )}
@@ -541,7 +540,7 @@ export function FilesPanel({ files, citations = [], selectedCitationUrl, onClose
               <div className="text-center">
                 <FileText className="h-16 w-16 text-gray-400 mx-auto mb-4" />
                 <p className="text-sm text-gray-500">
-                  Select a source to view
+                  Selecteer een bron om te bekijken
                 </p>
               </div>
             </div>

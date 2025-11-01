@@ -11,7 +11,7 @@ interface WooDocument {
   contact_people?: string;
   departments?: string;
   documents?: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 interface WooHistoryModalProps {
@@ -24,12 +24,6 @@ export function WooHistoryModal({ isOpen, onClose, wooRequest }: WooHistoryModal
   const [loading, setLoading] = useState(false);
   const [documents, setDocuments] = useState<WooDocument[]>([]);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (isOpen && wooRequest) {
-      fetchSimilarDocuments();
-    }
-  }, [isOpen, wooRequest]);
 
   const fetchSimilarDocuments = async () => {
     setLoading(true);
@@ -60,6 +54,13 @@ export function WooHistoryModal({ isOpen, onClose, wooRequest }: WooHistoryModal
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (isOpen && wooRequest) {
+      fetchSimilarDocuments();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, wooRequest]);
 
   return (
     <AnimatePresence>

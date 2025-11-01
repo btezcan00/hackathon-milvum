@@ -34,7 +34,14 @@ except ImportError as e:
     WEB_CRAWLER_AVAILABLE = False
 
 app = Flask(__name__)
-CORS(app)
+# Configure CORS to allow all origins, methods, and headers for development
+CORS(app, resources={
+    r"/api/*": {
+        "origins": "*",
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"]
+    }
+})
 
 # Configuration
 UPLOAD_FOLDER = '/tmp/uploads'

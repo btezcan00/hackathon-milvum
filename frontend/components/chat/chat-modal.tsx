@@ -156,7 +156,7 @@ export function ChatModal({ isOpen, onClose }: ChatModalProps) {
                       }}
                       className="text-gray-600 hover:text-gray-900"
                     >
-                      WOO History
+                      WOO Geschiedenis
                     </Button>
                     <Button
                       variant="ghost"
@@ -164,7 +164,7 @@ export function ChatModal({ isOpen, onClose }: ChatModalProps) {
                       onClick={onClose}
                       className="text-gray-600 hover:text-gray-900"
                     >
-                      Close
+                      Sluiten
                     </Button>
                   </div>
                 </div>
