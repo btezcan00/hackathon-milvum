@@ -831,5 +831,76 @@ def list_conversations():
         logger.error(f"Error listing conversations: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/woo-history', methods=['POST'])
+def woo_history():
+    """
+    Find similar WOO documents based on the current WOO request.
+    Uses text-embedding-3-small to embed the request and searches Pinecone woo-requests index.
+    Returns the top 3 most similar documents.
+    """
+    try:
+        data = request.get_json()
+        woo_request = data.get('woo_request', '')
+        top_k = data.get('top_k', 3)
+
+        if not woo_request:
+            return jsonify({'error': 'woo_request is required'}), 400
+
+        logger.info(f"Finding similar WOO documents for request: {woo_request[:100]}...")
+
+        # Step 1: Embed the WOO request using text-embedding-3-small
+        query_embedding = embedding_service.embed_text(woo_request)
+        logger.info(f"Generated embedding with dimension: {len(query_embedding)}")
+
+        # Step 2: Initialize Pinecone client for woo-requests index
+        from services.pinecone_service import PineconeRAGClient
+        pinecone_client = PineconeRAGClient()
+
+        # Connect to woo-requests index
+        woo_index_name = "woo-requests"
+        try:
+            pinecone_client.index = pinecone_client.pc.Index(woo_index_name)
+            logger.info(f"Connected to Pinecone index: {woo_index_name}")
+        except Exception as e:
+            logger.error(f"Error connecting to index {woo_index_name}: {e}")
+            return jsonify({'error': f'Pinecone index {woo_index_name} not found or not accessible'}), 500
+
+        # Step 3: Search for similar documents using cosine similarity
+        search_results = pinecone_client.search_with_metadata(
+            query_vector=query_embedding,
+            top_k=top_k,
+            include_metadata=True
+        )
+
+        logger.info(f"Found {len(search_results)} similar documents")
+
+        # Step 4: Format results with proper metadata extraction
+        similar_documents = []
+        for result in search_results:
+            payload = result.get('payload', {})
+
+            # Extract metadata fields
+            similar_doc = {
+                'id': result['id'],
+                'score': result['score'],
+                'woo_request': payload.get('woo_request', ''),
+                'contact_people': payload.get('contact_people', ''),
+                'departments': payload.get('departments', ''),
+                'documents': payload.get('documents', ''),
+                'metadata': payload  # Keep full metadata for compatibility
+            }
+
+            similar_documents.append(similar_doc)
+
+        return jsonify({
+            'woo_request': woo_request,
+            'similar_documents': similar_documents,
+            'count': len(similar_documents)
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Error in woo-history endpoint: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5001, debug=True)
