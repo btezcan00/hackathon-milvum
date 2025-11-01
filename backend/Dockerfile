@@ -15,14 +15,14 @@ COPY requirements.txt .
 RUN pip install -r requirements.txt
 
 # Install Playwright browsers for Crawl4AI
-RUN playwright install chromium
-RUN playwright install-deps chromium
+RUN python -m playwright install chromium
+RUN python -m playwright install-deps chromium
 
 # Copy application code
 COPY . .
 
-# Expose port
-EXPOSE 5000
+# Expose port (Railway will inject PORT env variable)
+EXPOSE 8080
 
-# Run application
-CMD ["gunicorn", "--bind", "0.0.0.0:5050", "--workers", "2", "--timeout", "120", "app:app"]
+# Run application - use PORT env variable (Railway/Render compatible)
+CMD gunicorn --bind 0.0.0.0:$PORT --workers 2 --timeout 120 app:app
