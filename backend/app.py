@@ -84,11 +84,25 @@ def upload_file():
         if not files or files[0].filename == '':
             return jsonify({'error': 'No files provided'}), 400
         
+        # Get Google Drive URLs if provided (as form data or JSON)
+        drive_urls = []
+        if request.form:
+            # Get drive_urls from form data (can be multiple, matching files)
+            drive_urls_raw = request.form.getlist('drive_url') or request.form.getlist('driveUrl') or request.form.getlist('google_drive_url')
+            drive_urls = [url for url in drive_urls_raw if url and url.strip()]
+        elif request.is_json:
+            # If JSON request, get from JSON body
+            data = request.get_json()
+            if isinstance(data, dict) and 'drive_urls' in data:
+                drive_urls = data['drive_urls'] if isinstance(data['drive_urls'], list) else [data['drive_urls']]
+            elif isinstance(data, dict) and 'drive_url' in data:
+                drive_urls = [data['drive_url']] if data['drive_url'] else []
+        
         # Validate and save files
         filepaths = []
         filenames = []
         
-        for file in files:
+        for i, file in enumerate(files):
             if file and allowed_file(file.filename):
                 filename = secure_filename(file.filename)
                 filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
@@ -99,11 +113,14 @@ def upload_file():
                 return jsonify({'error': f'File type not allowed: {file.filename}'}), 400
         
         logger.info(f"Processing {len(files)} file(s)...")
+        if drive_urls:
+            logger.info(f"Google Drive URLs provided for {len(drive_urls)} file(s)")
         
-        # Process files in parallel
+        # Process files in parallel with drive URLs
         results = document_pipeline.process_files_parallel(
             filepaths=filepaths,
             filenames=filenames,
+            drive_urls=drive_urls if drive_urls else None,  # Pass drive URLs if available
             max_workers=4,  # Adjust based on your server capacity
             split_length=10,
             split_overlap=2,
@@ -350,12 +367,30 @@ Geef een helder antwoord op basis van de bovenstaande context. Gebruik [1], [2],
                 page_numbers = metadata.get('page_numbers', [])
                 page_info = f" (pagina's {', '.join(map(str, page_numbers))})" if page_numbers else ""
                 
+                # Debug: Log metadata keys and Google Drive URL
+                logger.info(f"[Citation] Document: {doc_name}")
+                logger.info(f"[Citation] Metadata keys: {list(metadata.keys())}")
+                logger.info(f"[Citation] Full metadata: {metadata}")
+                
                 # Extract Google Drive link if available in metadata
-                drive_url = metadata.get('google_drive_url') or metadata.get('drive_url') or metadata.get('gdrive_url') or ''
+                drive_url = metadata.get('google_drive_url') or metadata.get('drive_url') or metadata.get('gdrive_url') or None
+                logger.info(f"[Citation] Extracted drive_url: {drive_url}")
+                # Ensure we have a valid URL string (not None or empty)
+                if drive_url and isinstance(drive_url, str) and drive_url.strip():
+                    citation_url = drive_url.strip()
+                    logger.info(f"[Citation] Using Google Drive URL: {citation_url}")
+                else:
+                    citation_url = f"file://{doc_name}"
+                    logger.info(f"[Citation] Using fallback file:// URL: {citation_url}")
+                
+                # Ensure citation_url is always a valid string (never None)
+                if not citation_url or not isinstance(citation_url, str):
+                    citation_url = f"file://{doc_name}"
+                    logger.warning(f"[Citation] Invalid citation_url, using fallback: {citation_url}")
                 
                 citation = {
                     'id': str(uuid.uuid4()),
-                    'url': drive_url or f"file://{doc_name}",  # Use Google Drive link if available, otherwise file:// protocol
+                    'url': str(citation_url),  # Ensure it's a string - Use Google Drive link if available, otherwise file:// protocol
                     'title': doc_name,
                     'snippet': doc.get('text', '')[:300] + ('...' if len(doc.get('text', '')) > 300 else ''),
                     'relevanceScore': doc.get('score', 0.0),
@@ -365,6 +400,8 @@ Geef een helder antwoord op basis van de bovenstaande context. Gebruik [1], [2],
                     'highlightText': doc.get('text', '')[:100],
                     'type': 'document'  # Mark as document citation
                 }
+                
+                logger.info(f"[Citation] Final citation URL: {citation['url']}")
                 
                 # Add date if available in metadata
                 if 'date' in metadata:

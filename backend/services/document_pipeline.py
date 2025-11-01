@@ -138,7 +138,8 @@ class DocumentPipeline:
         filename: str,
         split_length: int = 10,
         split_overlap: int = 2,
-        batch_size: int = 100
+        batch_size: int = 100,
+        drive_url: str = None
     ) -> Dict[str, Any]:
         """
         Process a single file: extract, chunk, embed, upload to Pinecone.
@@ -220,6 +221,12 @@ class DocumentPipeline:
                     'document_name': chunk['metadata']['document_name'],
                     'page_numbers': [str(p) for p in chunk['metadata']['page_numbers']]  # Convert to strings
                 }
+                # Add Google Drive URL if provided
+                if drive_url:
+                    doc['google_drive_url'] = drive_url
+                    logger.info(f"[DocumentPipeline] Storing Google Drive URL for {document_name}: {drive_url}")
+                else:
+                    logger.info(f"[DocumentPipeline] No Google Drive URL provided for {document_name}")
                 documents.append(doc)
                 vectors.append(embedding)
             
@@ -252,6 +259,7 @@ class DocumentPipeline:
         self,
         filepaths: List[str],
         filenames: List[str],
+        drive_urls: List[str] = None,
         max_workers: int = 4,
         split_length: int = 10,
         split_overlap: int = 2,
@@ -273,6 +281,15 @@ class DocumentPipeline:
         """
         results = []
         
+        # Match drive URLs to files by index
+        if drive_urls is None:
+            drive_urls = [None] * len(filepaths)
+        else:
+            # Ensure drive_urls list matches filepaths length
+            while len(drive_urls) < len(filepaths):
+                drive_urls.append(None)
+            drive_urls = drive_urls[:len(filepaths)]  # Trim if too many
+        
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             # Submit all files for processing
             future_to_file = {
@@ -282,9 +299,10 @@ class DocumentPipeline:
                     filename,
                     split_length,
                     split_overlap,
-                    batch_size
+                    batch_size,
+                    drive_url  # Pass Google Drive URL if available
                 ): filename
-                for filepath, filename in zip(filepaths, filenames)
+                for filepath, filename, drive_url in zip(filepaths, filenames, drive_urls)
             }
             
             # Collect results as they complete
