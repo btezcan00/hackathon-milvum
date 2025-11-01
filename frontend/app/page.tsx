@@ -24,8 +24,21 @@ export default function Home() {
       </header>
 
       {/* Main content - completely white */}
-      <main className="min-h-[calc(100vh-80px)] bg-white">
-        {/* Empty white space */}
+      <main className="h-screen bg-white">
+      <div className="flex justify-center items-center gap-10 py-16">
+        <img
+          src="/milvum-logo.png"
+          alt="Milvum logo"
+          className="h-32 w-auto object-contain"
+          style={{ height: '128px' }}
+        />
+        <img
+          src="/terminal-logo.svg"
+          alt="Terminal Woo"
+          className="h-32 w-auto object-contain"
+          style={{ height: '128px' }}
+        />
+      </div>
       </main>
 
       {/* Chat Modal */}

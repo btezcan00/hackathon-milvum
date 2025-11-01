@@ -8,6 +8,7 @@ from services.document_processor import DocumentProcessor
 from services.rag_service import RAGService
 from services.llm_service import EmbeddingService, ChatService
 from services.citation_service import CitationService
+from services.url_selector import URLSelector
 import logging
 from datetime import datetime
 import uuid
@@ -42,6 +43,7 @@ chat_service = ChatService()
 doc_processor = DocumentProcessor()
 rag_service = RAGService(embedding_service)
 citation_service = CitationService(embedding_service)
+url_selector = URLSelector(chat_service)
 
 # Web crawler will be initialized per request (to avoid keeping browser open)
 def get_web_crawler():
@@ -249,11 +251,18 @@ def research():
         try:
             # Generate or use provided URLs
             if not urls:
-                # For now, we'll require URLs to be provided
-                # In future, could integrate with search APIs
-                return jsonify({
-                    'error': 'URLs required for research. Please provide URLs to crawl.'
-                }), 400
+                # Automatically select relevant URLs based on the query
+                logger.info(f"No URLs provided, selecting relevant URLs for query: {query[:100]}...")
+                urls = url_selector.select_urls(query, max_urls=max_results + 2)  # Get a few extra URLs for safety
+                
+                if not urls:
+                    return jsonify({
+                        'error': 'Could not find relevant government sources for your query. Please try rephrasing your question.',
+                        'query': query,
+                        'conversation_id': conversation_id
+                    }), 200
+                
+                logger.info(f"Selected {len(urls)} URLs automatically: {urls[:3]}...")
             
             # Filter URLs by allowed domains if domain_filter provided
             if domain_filter:

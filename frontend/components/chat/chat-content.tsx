@@ -123,7 +123,7 @@ export function ChatContent({ onClose, onFilesChange }: ChatContentProps) {
 
     try {
       // If research mode is enabled, try research endpoint
-      // Note: URL discovery will be automated later
+      // URLs will be automatically selected by the backend based on the query
       if (researchMode) {
         try {
           const response = await fetch('/api/research', {
@@ -133,19 +133,14 @@ export function ChatContent({ onClose, onFilesChange }: ChatContentProps) {
             },
             body: JSON.stringify({
               query: content,
-              urls: [], // Will be auto-discovered in future implementation
+              // URLs not needed - backend will automatically select relevant government sources
               max_results: 5,
             }),
           });
 
           if (!response.ok) {
             const errorData = await response.json().catch(() => ({ error: response.statusText }));
-            // If error is about missing URLs, fall back to regular chat
-            if (errorData.error && errorData.error.includes('URLs required')) {
-              // Fall through to regular chat mode
-            } else {
-              throw new Error(errorData.error || `Failed to get research response (${response.status})`);
-            }
+            throw new Error(errorData.error || `Failed to get research response (${response.status})`);
           } else {
             const data = await response.json();
             messageIdCounter.current += 1;
