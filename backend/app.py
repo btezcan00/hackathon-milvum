@@ -102,14 +102,24 @@ def upload_file():
         
         logger.info(f"Processing {len(files)} file(s)...")
         
+        # Get chunking parameters from request (optional, with sensible defaults)
+        use_semantic = request.form.get('use_semantic', 'true').lower() == 'true'
+        similarity_threshold = float(request.form.get('similarity_threshold', '0.76'))
+        split_length = int(request.form.get('split_length', '10'))
+        split_overlap = int(request.form.get('split_overlap', '2'))
+        
+        logger.info(f"Using semantic chunking: {use_semantic}, threshold: {similarity_threshold}")
+        
         # Process files in parallel
         results = document_pipeline.process_files_parallel(
             filepaths=filepaths,
             filenames=filenames,
             max_workers=4,  # Adjust based on your server capacity
-            split_length=10,
-            split_overlap=2,
-            batch_size=100
+            split_length=split_length,
+            split_overlap=split_overlap,
+            batch_size=100,
+            use_semantic_chunking=use_semantic,
+            similarity_threshold=similarity_threshold
         )
         
         # Clean up uploaded files
