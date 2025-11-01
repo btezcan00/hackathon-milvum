@@ -14,8 +14,11 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Verify playwright is installed and install browsers
+# Verify critical packages are installed
+RUN pip show gunicorn || pip install gunicorn==21.2.0
 RUN pip show playwright || pip install playwright>=1.40.0
+
+# Install Playwright browsers
 RUN python -m playwright install --with-deps chromium
 
 # Copy application code
@@ -25,4 +28,5 @@ COPY . .
 EXPOSE 8080
 
 # Run application - use PORT env variable (Railway/Render compatible)
-CMD gunicorn --bind 0.0.0.0:$PORT --workers 2 --timeout 120 app:app
+# Use shell form to allow environment variable expansion
+CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT:-8080} --workers 2 --timeout 120 app:app"]
