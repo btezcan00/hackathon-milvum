@@ -5,6 +5,7 @@ import { useState, useCallback, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { ChatContent } from './chat-content';
 import { FilesPanel } from './files-panel';
+import { WooHistoryModal } from '@/components/woo-history/woo-history-modal';
 import type { FileWithMetadata } from './files-panel';
 import type { Citation } from '@/components/citations/citation-list';
 
@@ -18,6 +19,8 @@ export function ChatModal({ isOpen, onClose }: ChatModalProps) {
   const [citations, setCitations] = useState<Citation[]>([]);
   const [showFilesPanel, setShowFilesPanel] = useState(false);
   const [selectedCitationUrl, setSelectedCitationUrl] = useState<string | undefined>(undefined);
+  const [showWooHistory, setShowWooHistory] = useState(false);
+  const [currentWooRequest, setCurrentWooRequest] = useState<string>('');
 
   // Use refs to track previous values to avoid infinite loops
   const prevFilesRef = useRef<FileWithMetadata[]>([]);
@@ -142,14 +145,28 @@ export function ChatModal({ isOpen, onClose }: ChatModalProps) {
                     )}
                     <h2 className="text-lg font-semibold text-gray-900">Chat</h2>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={onClose}
-                    className="text-gray-600 hover:text-gray-900"
-                  >
-                    Close
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        // Mock WOO request for demonstration
+                        setCurrentWooRequest('Welke beleidsdocumenten of interne memo\'s zijn opgesteld over rattenoverlast?');
+                        setShowWooHistory(true);
+                      }}
+                      className="text-gray-600 hover:text-gray-900"
+                    >
+                      WOO History
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={onClose}
+                      className="text-gray-600 hover:text-gray-900"
+                    >
+                      Close
+                    </Button>
+                  </div>
                 </div>
 
                 {/* Content Area - Files Panel + Chat */}
@@ -182,11 +199,12 @@ export function ChatModal({ isOpen, onClose }: ChatModalProps) {
 
                   {/* Chat Modal - fixed width, doesn't move */}
                   <div className="flex-shrink-0 w-[720px] flex flex-col border-l border-gray-200">
-                    <ChatContent 
-                      onClose={onClose} 
+                    <ChatContent
+                      onClose={onClose}
                       onFilesChange={handleFilesChange}
                       onCitationsChange={handleCitationsChange}
                       onCitationClick={handleCitationClick}
+                      onWooRequestChange={setCurrentWooRequest}
                       hideHeader={true}
                     />
                   </div>
@@ -194,6 +212,13 @@ export function ChatModal({ isOpen, onClose }: ChatModalProps) {
               </motion.div>
             </div>
           </div>
+
+          {/* WOO History Modal */}
+          <WooHistoryModal
+            isOpen={showWooHistory}
+            onClose={() => setShowWooHistory(false)}
+            wooRequest={currentWooRequest}
+          />
         </>
       )}
     </AnimatePresence>

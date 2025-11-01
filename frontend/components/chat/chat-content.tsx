@@ -16,6 +16,7 @@ interface ChatContentProps {
   onFilesChange: (files: FileWithMetadata[]) => void;
   onCitationsChange?: (citations: Citation[]) => void;
   onCitationClick?: (citation: Citation) => void;
+  onWooRequestChange?: (wooRequest: string) => void;
   hideHeader?: boolean;
 }
 
@@ -33,7 +34,7 @@ interface Message {
   crawledWebsites?: CrawledWebsite[];
 }
 
-export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitationClick, hideHeader = false }: ChatContentProps) {
+export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitationClick, onWooRequestChange, hideHeader = false }: ChatContentProps) {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [uploadedFiles, setUploadedFiles] = useState<FileWithMetadata[]>([]);
@@ -45,6 +46,13 @@ export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitat
   const scrollRef = useRef<HTMLDivElement>(null);
   const messageIdCounter = useRef<number>(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Track input changes to update WOO request
+  useEffect(() => {
+    if (onWooRequestChange) {
+      onWooRequestChange(input);
+    }
+  }, [input, onWooRequestChange]);
 
   useEffect(() => {
     if (scrollRef.current) {

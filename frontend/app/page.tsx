@@ -37,7 +37,15 @@ export default function Home() {
       {/* Simple header with Chat button */}
       <header className="border-b border-gray-200">
         <div className="max-w-full mx-auto px-6 py-4">
-          <div className="flex items-center justify-end">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <a
+                href="/woo-requests"
+                className="text-gray-700 hover:text-gray-900 font-medium transition-colors"
+              >
+                WOO Requests
+              </a>
+            </div>
             <Button
               onClick={() => setIsChatOpen(true)}
               className="bg-black text-white hover:bg-gray-800 rounded-lg px-6 py-2"
