@@ -902,5 +902,74 @@ def woo_history():
         logger.error(f"Error in woo-history endpoint: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/woo-requests', methods=['GET'])
+def get_woo_requests():
+    """
+    Fetch all WOO requests from the Pinecone woo-requests index.
+    This endpoint retrieves all stored WOO requests for display in the table.
+    """
+    try:
+        logger.info("Fetching all WOO requests from Pinecone...")
+
+        # Initialize Pinecone client
+        from services.pinecone_service import PineconeRAGClient
+        pinecone_client = PineconeRAGClient()
+
+        # Connect to woo-requests index
+        woo_index_name = "woo-requests"
+        try:
+            pinecone_client.index = pinecone_client.pc.Index(woo_index_name)
+            logger.info(f"Connected to Pinecone index: {woo_index_name}")
+        except Exception as e:
+            logger.error(f"Error connecting to index {woo_index_name}: {e}")
+            return jsonify({'error': f'Pinecone index {woo_index_name} not found or not accessible'}), 500
+
+        # Get index stats to understand how many vectors we have
+        stats = pinecone_client.get_index_stats()
+        total_vectors = stats.get('total_vector_count', 0)
+        logger.info(f"Total vectors in index: {total_vectors}")
+
+        # Fetch all vectors using a dummy query (we'll fetch top_k results)
+        # Create a zero vector for querying (this is a workaround to get all records)
+        import numpy as np
+        dummy_vector = [0.0] * 1536  # text-embedding-3-small dimension
+
+        # Fetch all available vectors (limit to 100 for performance)
+        top_k = min(100, total_vectors) if total_vectors > 0 else 100
+
+        search_results = pinecone_client.search_with_metadata(
+            query_vector=dummy_vector,
+            top_k=top_k,
+            include_metadata=True
+        )
+
+        logger.info(f"Retrieved {len(search_results)} WOO requests")
+
+        # Format results
+        woo_requests = []
+        for result in search_results:
+            payload = result.get('payload', {})
+
+            woo_req = {
+                'id': result['id'],
+                'woo_request': payload.get('woo_request', ''),
+                'contact_people': payload.get('contact_people', ''),
+                'departments': payload.get('departments', ''),
+                'documents': payload.get('documents', ''),
+                'handled_date': payload.get('handled_date', None)
+            }
+
+            woo_requests.append(woo_req)
+
+        return jsonify({
+            'woo_requests': woo_requests,
+            'count': len(woo_requests),
+            'total_in_index': total_vectors
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Error fetching WOO requests: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5001, debug=True)

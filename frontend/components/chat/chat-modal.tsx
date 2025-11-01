@@ -149,7 +149,11 @@ export function ChatModal({ isOpen, onClose }: ChatModalProps) {
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => setShowWooHistory(true)}
+                      onClick={() => {
+                        // Mock WOO request for demonstration
+                        setCurrentWooRequest('Welke beleidsdocumenten of interne memo\'s zijn opgesteld over rattenoverlast?');
+                        setShowWooHistory(true);
+                      }}
                       className="text-gray-600 hover:text-gray-900"
                     >
                       WOO History
