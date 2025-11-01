@@ -37,9 +37,11 @@ export function PDFViewerWithHighlights({
   // Debug: Log props on mount and when they change
   useEffect(() => {
     console.log('[PDFViewer] ===== COMPONENT PROPS =====');
-    console.log('[PDFViewer] url:', url);
+    console.log('[PDFViewer] PDF URL:', url);
+    console.log('[PDFViewer] PDF filename:', url?.split('/').pop()?.split('?')[0]);
     console.log('[PDFViewer] highlightText:', highlightText);
     console.log('[PDFViewer] highlightText length:', highlightText?.length || 0);
+    console.log('[PDFViewer] highlightText preview:', highlightText?.substring(0, 100));
     console.log('[PDFViewer] pageNumbers:', pageNumbers);
     console.log('[PDFViewer] ===========================');
   }, [url, highlightText, pageNumbers]);
@@ -103,18 +105,23 @@ export function PDFViewerWithHighlights({
     console.log('[PDFViewer] Target page numbers:', pageNumbers);
     console.log('[PDFViewer] ==========================================');
 
-    // Just use the entire text - no splitting or processing
-    const normalizedText = highlightText.toLowerCase()
-      .replace(/\s+/g, '.')
-      .trim();
+    const normalize = (text: string) => text.toLowerCase().replace(/\s+/g, ' ').trim();
+
+    // Split by dots to get sentences
+    const sentenceTexts = highlightText
+      .split('.')
+      .map(s => normalize(s))
+      .filter(s => s.length > 20); // Only keep sentences with 20+ chars
     
-    setSentences([{
-      text: highlightText,
-      normalizedText: normalizedText
-    }]);
+    const processedSentences = sentenceTexts.map(text => ({
+      text: text,
+      normalizedText: text.toLowerCase().replace(/\s+/g, ' ').trim()
+    }));
     
-    console.log('[PDFViewer] Will highlight entire text');
-    setMessage('Highlighting citation text');
+    setSentences(processedSentences);
+    console.log('[PDFViewer] Split into', processedSentences.length, 'sentences');
+    console.log('[PDFViewer] Sentences:', processedSentences.map(s => s.text.substring(0, 50)));
+    setMessage(`Searching for ${processedSentences.length} sentences`);
   }, [highlightText, pageNumbers]);
 
   // Custom plugin to highlight text
@@ -158,7 +165,7 @@ export function PDFViewerWithHighlights({
         // Build position map with span elements
         interface SpanInfo {
           element: HTMLElement;
-          text: string;
+          normalizedText: string;
           startPos: number;
           endPos: number;
         }
@@ -169,89 +176,70 @@ export function PDFViewerWithHighlights({
         textSpans.forEach((span) => {
           const element = span as HTMLElement;
           const text = element.textContent || '';
+          // Normalize: lowercase and collapse whitespace
+          const normalized = text.toLowerCase().replace(/\s+/g, ' ').trim();
+          
           spanInfos.push({
             element,
-            text,
+            normalizedText: normalized,
             startPos: position,
-            endPos: position + text.length
+            endPos: position + normalized.length
           });
-          position += text.length + 1; // +1 for space
+          position += normalized.length + 1; // +1 for space between spans
         });
         
-        // Build full page text
-        const fullPageText = spanInfos.map(s => s.text).join(' ').toLowerCase();
-        console.log('[PDFViewer] Page text sample:', fullPageText.substring(0, 300));
+        // Build full page text from normalized spans and collapse double spaces
+        const fullPageText = spanInfos.map(s => s.normalizedText).join(' ')
+          .replace(/\s+/g, ' ')  // Normalize again after joining
+          .trim();
+        console.log('[PDFViewer] Page text (normalized):', fullPageText.substring(0, 300));
+        console.log('[PDFViewer] Full page text length:', fullPageText.length, 'chars');
 
         let highlightCount = 0;
         const highlightedSpans = new Set<HTMLElement>();
         
-        // Extract meaningful keywords (5+ chars, filter common words)
-        const commonWords = ['deze', 'heeft', 'zijn', 'wordt', 'werd', 'waren', 'hebben', 'kunnen', 'zullen', 'moeten', 'voor', 'naar', 'over', 'door', 'maar', 'omdat', 'wanneer', 'waar', 'meer', 'veel', 'daar', 'hier', 'andere', 'tussen', 'eerst', 'totaal'];
-        
+        // Search for exact sentences in the PDF
         sentences.forEach((sentence: Sentence, sentenceIdx: number) => {
-          console.log(`[PDFViewer] Searching for sentence ${sentenceIdx + 1}:`, sentence.text.substring(0, 100));
+          console.log(`\n[PDFViewer] === Sentence ${sentenceIdx + 1} ===`);
+          console.log(`[PDFViewer] Looking for: "${sentence.text.substring(0, 60)}..."`);
           
-          const searchText = sentence.text.toLowerCase();
+          const searchText = sentence.normalizedText;
           
-          // Extract top keywords (words 6+ chars, not common, take top 5 most unique)
-          const keywords = searchText
-            .split(/\s+/)
-            .filter(word => word.length >= 6)
-            .filter(word => !commonWords.includes(word))
-            .filter(word => /^[a-z]+$/.test(word)) // Only letters
-            .slice(0, 5); // Only use top 5 keywords
+          // Try to find exact match in page text
+          const matchIndex = fullPageText.indexOf(searchText);
           
-          console.log(`[PDFViewer] Top keywords to find:`, keywords);
-          
-          if (keywords.length === 0) {
-            console.log(`[PDFViewer] No valid keywords found`);
-            return;
-          }
-          
-          // Calculate keyword density in sliding windows
-          const WINDOW_SIZE = 20; // Look at 20 spans at a time
-          const densityScores: Array<{ startIdx: number, endIdx: number, score: number }> = [];
-          
-          for (let i = 0; i < spanInfos.length - WINDOW_SIZE; i++) {
-            let score = 0;
-            const windowText = spanInfos
-              .slice(i, i + WINDOW_SIZE)
-              .map(s => s.text)
-              .join(' ')
-              .toLowerCase();
+          if (matchIndex !== -1) {
+            console.log(`[PDFViewer] ✅ FOUND at character position ${matchIndex}`);
+            console.log(`[PDFViewer] Context: "...${fullPageText.substring(Math.max(0, matchIndex - 30), matchIndex + 80)}..."`);
             
-            // Count how many keywords appear in this window
-            keywords.forEach(keyword => {
-              if (windowText.includes(keyword)) {
-                score += 1;
+            // Find all spans that overlap with this match
+            const matchEnd = matchIndex + searchText.length;
+            
+            spanInfos.forEach((spanInfo) => {
+              if (spanInfo.endPos > matchIndex && spanInfo.startPos < matchEnd) {
+                if (!highlightedSpans.has(spanInfo.element)) {
+                  spanInfo.element.style.backgroundColor = 'rgba(255, 191, 88, 0.9)';
+                  spanInfo.element.style.padding = '2px';
+                  spanInfo.element.style.borderRadius = '2px';
+                  highlightedSpans.add(spanInfo.element);
+                  highlightCount++;
+                }
               }
             });
-            
-            if (score > 0) {
-              densityScores.push({ startIdx: i, endIdx: i + WINDOW_SIZE, score });
-            }
-          }
-          
-          // Sort by score and take only top 2 regions
-          densityScores.sort((a, b) => b.score - a.score);
-          const topRegions = densityScores.slice(0, 2);
-          
-          console.log(`[PDFViewer] Found ${topRegions.length} high-density regions`);
-          
-          // Highlight only the top density regions
-          topRegions.forEach(region => {
-            console.log(`[PDFViewer] Highlighting region ${region.startIdx}-${region.endIdx} (score: ${region.score})`);
-            for (let i = region.startIdx; i < region.endIdx; i++) {
-              const spanInfo = spanInfos[i];
-              if (!highlightedSpans.has(spanInfo.element)) {
-                spanInfo.element.style.backgroundColor = 'rgba(255, 191, 88, 0.9)';
-                spanInfo.element.style.padding = '2px';
-                spanInfo.element.style.borderRadius = '2px';
-                highlightedSpans.add(spanInfo.element);
-                highlightCount++;
+          } else {
+            console.log(`[PDFViewer] ❌ NOT FOUND on this page`);
+            // Show if we can find any of the key words
+            const words = searchText.split(' ').filter(w => w.length > 5).slice(0, 3);
+            console.log(`[PDFViewer] Checking for key words:`, words);
+            words.forEach(word => {
+              const wordIndex = fullPageText.indexOf(word);
+              if (wordIndex !== -1) {
+                console.log(`[PDFViewer]   - Found "${word}" at position ${wordIndex}`);
+              } else {
+                console.log(`[PDFViewer]   - Word "${word}" not found`);
               }
-            }
-          });
+            });
+          }
         });
         
         console.log('[PDFViewer] Highlighted', highlightCount, 'spans on page', e.pageIndex + 1);
