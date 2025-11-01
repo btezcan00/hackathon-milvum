@@ -5,7 +5,6 @@ from werkzeug.utils import secure_filename
 import os
 import asyncio
 from dotenv import load_dotenv
-from services.document_processor import DocumentProcessor
 from services.rag_service import RAGService
 from services.llm_service import EmbeddingService, ChatService
 from services.citation_service import CitationService
@@ -48,7 +47,6 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 embedding_service = EmbeddingService()
 chat_service = ChatService()
 groq_service = GroqService()  # Fast model for URL classification
-doc_processor = DocumentProcessor()
 rag_service = RAGService(embedding_service)
 citation_service = CitationService(embedding_service)
 url_selector = URLSelector(groq_service)  # Use Groq for fast URL selection
@@ -102,24 +100,14 @@ def upload_file():
         
         logger.info(f"Processing {len(files)} file(s)...")
         
-        # Get chunking parameters from request (optional, with sensible defaults)
-        use_semantic = request.form.get('use_semantic', 'true').lower() == 'true'
-        similarity_threshold = float(request.form.get('similarity_threshold', '0.76'))
-        split_length = int(request.form.get('split_length', '10'))
-        split_overlap = int(request.form.get('split_overlap', '2'))
-        
-        logger.info(f"Using semantic chunking: {use_semantic}, threshold: {similarity_threshold}")
-        
         # Process files in parallel
         results = document_pipeline.process_files_parallel(
             filepaths=filepaths,
             filenames=filenames,
             max_workers=4,  # Adjust based on your server capacity
-            split_length=split_length,
-            split_overlap=split_overlap,
-            batch_size=100,
-            use_semantic_chunking=use_semantic,
-            similarity_threshold=similarity_threshold
+            split_length=10,
+            split_overlap=2,
+            batch_size=100
         )
         
         # Clean up uploaded files
@@ -297,6 +285,7 @@ def chat():
             })
             answer = chat_service.chat(messages)
             sources = []
+            pdf_citations = []
             
         else:  # mode == "rag"
             # RAG: Retrieve documents and answer with context
@@ -306,11 +295,17 @@ def chat():
                 initial_k=30
             )
             
-            # Build context from retrieved documents
-            context = "\n\n".join([
-                f"Document: {doc.get('metadata', {}).get('document_name', 'Onbekend')}\n{doc.get('text', '')}"
-                for doc in search_results['sources']
-            ])
+            # Build context from retrieved documents with numbered citations
+            context_parts = []
+            for i, doc in enumerate(search_results['sources'], 1):
+                metadata = doc.get('metadata', {})
+                doc_name = metadata.get('document_name', 'Onbekend')
+                page_numbers = metadata.get('page_numbers', [])
+                page_info = f" (pagina's {', '.join(map(str, page_numbers))})" if page_numbers else ""
+                context_parts.append(
+                    f"[{i}] Document: {doc_name}{page_info}\n{doc.get('text', '')}"
+                )
+            context = "\n\n".join(context_parts)
             
             messages = [
                 {
@@ -319,12 +314,12 @@ def chat():
 
 Je taak:
 1. Beantwoord de vraag van de gebruiker op basis van de verstrekte documentcontext
-2. Citeer specifieke informatie uit de documenten wanneer relevant
+2. Citeer specifieke informatie uit de documenten wanneer relevant met [1], [2], etc. format
 3. Als de context niet voldoende informatie bevat, zeg dit eerlijk
 4. Blijf professioneel en helder in je uitleg
 5. Gebruik eerdere berichten in het gesprek om context te behouden
 
-Antwoord altijd in het Nederlands."""
+Antwoord altijd in het Nederlands. Gebruik citaties [1], [2], etc. om naar documenten te verwijzen."""
                 }
             ]
             
@@ -336,10 +331,43 @@ Antwoord altijd in het Nederlands."""
 
 Vraag van gebruiker: {query}
 
-Geef een helder antwoord op basis van de bovenstaande context."""
+Geef een helder antwoord op basis van de bovenstaande context. Gebruik [1], [2], etc. om naar de documenten te verwijzen."""
             })
             
             answer = chat_service.chat(messages)
+            
+            # Format sources as citations (similar to web citations)
+            pdf_citations = []
+            for i, doc in enumerate(search_results['sources'], 1):
+                metadata = doc.get('metadata', {})
+                doc_name = metadata.get('document_name', 'Onbekend')
+                page_numbers = metadata.get('page_numbers', [])
+                page_info = f" (pagina's {', '.join(map(str, page_numbers))})" if page_numbers else ""
+                
+                # Extract Google Drive link if available in metadata
+                drive_url = metadata.get('google_drive_url') or metadata.get('drive_url') or metadata.get('gdrive_url') or ''
+                
+                citation = {
+                    'id': str(uuid.uuid4()),
+                    'url': drive_url or f"file://{doc_name}",  # Use Google Drive link if available, otherwise file:// protocol
+                    'title': doc_name,
+                    'snippet': doc.get('text', '')[:300] + ('...' if len(doc.get('text', '')) > 300 else ''),
+                    'relevanceScore': doc.get('score', 0.0),
+                    'domain': 'Internal Document',
+                    'pageNumbers': page_numbers,
+                    'documentName': doc_name,
+                    'highlightText': doc.get('text', '')[:100],
+                    'type': 'document'  # Mark as document citation
+                }
+                
+                # Add date if available in metadata
+                if 'date' in metadata:
+                    citation['date'] = metadata['date']
+                if 'uploaded_at' in metadata:
+                    citation['uploadedAt'] = metadata['uploaded_at']
+                    
+                pdf_citations.append(citation)
+            
             sources = search_results['sources']
 
         # Store conversation
@@ -359,6 +387,7 @@ Geef een helder antwoord op basis van de bovenstaande context."""
         return jsonify({
             'answer': answer,
             'sources': sources,
+            'citations': pdf_citations if mode == 'rag' else [],  # Include PDF citations
             'query': query,
             'conversation_id': conversation_id,
             'message_count': len(conversations[conversation_id]),
@@ -428,17 +457,6 @@ def chat_plain():
                 
                 yield f"data: {json.dumps({'type': 'error', 'error': error_message})}\n\n"
                 yield f"data: [DONE]\n\n"
-        # Add current query with context
-        # Only add context if we have documents
-        if context.strip():
-            user_content = f"Context from government documents:\n\n{context}\n\nUser question: {query}\n\nPlease answer the user's question based on the documents provided above. Extract and synthesize information from the documents to provide a comprehensive answer."
-        else:
-            user_content = f"User question: {query}\n\nNo relevant documents were found in the knowledge base. Please let the user know that you don't have information about this topic."
-        
-        messages.append({
-            "role": "user",
-            "content": user_content
-        })
 
         # Generate answer using ChatService
         logger.info("Generating LLM answer with context...")

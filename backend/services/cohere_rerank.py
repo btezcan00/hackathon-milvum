@@ -55,7 +55,6 @@ class CohereReranker:
             for result in results.results:
                 original_doc = documents[result.index]
                 reranked_docs.append({
-                    'text': original_doc.get('text', ''),
                     'score': result.relevance_score,
                     'metadata': original_doc.get('metadata', {}),
                     'index': result.index

@@ -35,3 +35,7 @@ models/
 
 **/.env
 .env
+backend/keys/*.json
+docs/**
+gcp_func.py
+unique_files/**
