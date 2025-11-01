@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Text Parser with Haystack - Clean Version
+Text Parser with LangChain Semantic Chunking
 
 Chunks documents with:
-- Max 10 sentences per chunk
+- Semantic chunking (groups semantically similar content)
 - Metadata: document_name, page_numbers
 """
 
@@ -11,22 +11,10 @@ import os
 from pathlib import Path
 from typing import List, Dict
 import json
-import nltk
 from pypdf import PdfReader
 
-from haystack import Pipeline, Document, component
-from haystack.components.converters import PyPDFToDocument
-from haystack.components.preprocessors import DocumentCleaner, DocumentSplitter
-from haystack.document_stores.in_memory import InMemoryDocumentStore
-
-# Download NLTK data if needed
-try:
-    nltk.data.find('tokenizers/punkt')
-except LookupError:
-    import ssl
-    ssl._create_default_https_context = ssl._create_unverified_context
-    nltk.download('punkt')
-    nltk.download('punkt_tab')
+from langchain_experimental.text_splitter import SemanticChunker
+from langchain_openai import OpenAIEmbeddings
 
 
 def extract_text_with_pages(pdf_path: str) -> List[Dict]:
@@ -70,8 +58,8 @@ def extract_text_with_pages(pdf_path: str) -> List[Dict]:
 
 def create_chunks_with_pages(sentences_with_pages: List[Dict],
                              document_name: str,
-                             split_length: int = 10,
-                             split_overlap: int = 2) -> List[Dict]:
+                             split_length: int = 30,
+                             split_overlap: int = 5) -> List[Dict]:
     """
     Create chunks from sentences with page tracking.
 
@@ -125,9 +113,9 @@ def create_chunks_with_pages(sentences_with_pages: List[Dict],
 
 
 def parse_documents(
-    input_dir: str = "sprekers-info/Output Gemeente",
-    split_length: int = 10,
-    split_overlap: int = 2,
+    input_dir: str = "unique files",
+    split_length: int = 30,
+    split_overlap: int = 5,
     max_files: int = None,
     output_format: str = "json"
 ) -> List[Dict]:
@@ -190,12 +178,12 @@ def parse_documents(
     # Filter out chunks with meaningless text
     filtered_chunks = [
         chunk for chunk in all_chunks
-        if chunk['text'].strip() != ". . . . . . . . . ."
+        if chunk['text'].strip() != ". . . . . . . . . . . . . . . . . . . . . . . . . . . . . ."
     ]
 
     removed_count = len(all_chunks) - len(filtered_chunks)
     if removed_count > 0:
-        print(f"\n✓ Filtered out {removed_count} chunks with text '. . . . . . . . . .'")
+        print(f"\n✓ Filtered out {removed_count} chunks with text '. . . . . . . . . . . . . . . . . . . . . . . . . . . . . .'")
 
     print(f"\n✓ Processing complete!")
     print(f"Total chunks: {len(filtered_chunks)}")
@@ -240,9 +228,9 @@ def main():
     """Main function."""
 
     # Configuration
-    INPUT_DIR = "sprekers-info/Output Gemeente"
-    SPLIT_LENGTH = 10      # Max 10 sentences per chunk
-    SPLIT_OVERLAP = 2      # 2 sentence overlap
+    INPUT_DIR = "unique files"
+    SPLIT_LENGTH = 30    # Max 30 sentences per chunk
+    SPLIT_OVERLAP = 5      # 3 sentence overlap
     MAX_FILES = None       # Process all files (set to number for testing)
     OUTPUT_JSON = "parsed_chunks.json"
     OUTPUT_TXT = "parsed_chunks.txt"

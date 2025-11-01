@@ -86,7 +86,8 @@ class PineconeRAGClient:
             vector=query_vector,
             filter=filters,
             top_k=top_k,
-            include_metadata=include_metadata
+            include_metadata=include_metadata,
+            namespace="embedding-v3"
         )
         
         # Format results

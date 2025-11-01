@@ -1,0 +1,50 @@
+[
+  {
+    "category": "Categorie 2",
+    "question": "Welke beleidsdocumenten of interne memo’s zijn opgesteld over rattenoverlast?",
+    "status": "Deels beantwoord",
+    "answer": "De 'HLM SB Visie rattenbestrijding en KN25' en het document 'Samenspel Rattenbestrijding' zijn centrale beleidsdocumenten die de strategische aanpak beschrijven.",
+    "expected_sources": [
+      "HLM SB Visie rattenbestrijding en KN25 240425 (geanonimiseerd).pdf",
+      "Samenspel Rattenbestrijding (geanonimiseerd).pdf"
+    ]
+  },
+  {
+    "category": "Categorie 2",
+    "question": "Zijn er collegebesluiten, raadsinformatiebrieven of vergaderstukken waarin dit onderwerp aan bod komt?",
+    "status": "Deels beantwoord",
+    "answer": "De 'HLM SB Visie rattenbestrijding en KN25' is een ambtelijk advies aan het college, wat duidt op besluitvorming op college-niveau.",
+    "expected_sources": [
+      "HLM SB Visie rattenbestrijding en KN25 240425 (geanonimiseerd).pdf"
+    ]
+  },
+  {
+    "category": "Categorie 2",
+    "question": "Wanneer en hoe zijn beleidskeuzes geëvalueerd?",
+    "status": "Deels beantwoord",
+    "answer": "Er vinden specifieke evaluaties plaats, zoals de 'Evaluatie aanpak ratten begin 2022' en de evaluatie van de pilot in het Vondelkwartier.",
+    "expected_sources": [
+      "Document 20220633329 Evaluatie aanpak ratten begin 2022 Inhoud document (geanonimiseerd).pdf",
+      "Bijlage A evaluatie rattenaanpak Vondelkwartier Haarlem (geanonimiseerd).pdf"
+    ]
+  },
+  {
+    "category": "Categorie 3",
+    "question": "Welke partijen zijn betrokken bij de uitvoering van de rattenbestrijding?",
+    "status": "Deels beantwoord",
+    "answer": "De gemeente Haarlem (regisseur), Spaarnelanden (uitvoerder in openbare ruimte), en inwoners/ondernemers (verantwoordelijk op eigen terrein).",
+    "expected_sources": [
+      "Samenspel Rattenbestrijding (geanonimiseerd).pdf"
+    ]
+  },
+  {
+    "category": "Bijlage - Evaluatie",
+    "question": "Beoordeling van effectiviteit.",
+    "status": "Volledig beantwoord",
+    "answer": "De effectiviteit wordt beoordeeld in specifieke evaluatiedocumenten, zoals de 'Evaluatie aanpak ratten begin 2022' en de evaluatie van de pilot in het Vondelkwartier.",
+    "expected_sources": [
+      "Document 20220633329 Evaluatie aanpak ratten begin 2022 Inhoud document (geanonimiseerd).pdf",
+      "Bijlage A evaluatie rattenaanpak Vondelkwartier Haarlem (geanonimiseerd).pdf"
+    ]
+  }
+]
