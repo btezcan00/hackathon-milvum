@@ -51,7 +51,7 @@ export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitat
 
   // Use ref to track previous files to avoid infinite loops
   const prevFilesRef = useRef<FileWithMetadata[]>([]);
-  
+
   useEffect(() => {
     // Only call onFilesChange if files actually changed
     const filesChanged = uploadedFiles.length !== prevFilesRef.current.length ||
@@ -68,15 +68,15 @@ export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitat
 
   // Collect all citations from all messages and pass to parent
   const prevMessagesRef = useRef<Message[]>([]);
-  
+
   useEffect(() => {
     if (onCitationsChange) {
       // Only process if messages actually changed
       const messagesChanged = messages.length !== prevMessagesRef.current.length ||
         messages.some((msg, index) => {
           const prevMsg = prevMessagesRef.current[index];
-          return !prevMsg || msg.id !== prevMsg.id || 
-                 (msg.citations?.length || 0) !== (prevMsg.citations?.length || 0);
+          return !prevMsg || msg.id !== prevMsg.id ||
+            (msg.citations?.length || 0) !== (prevMsg.citations?.length || 0);
         });
 
       if (messagesChanged) {
@@ -101,17 +101,17 @@ export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitat
       const ext = file.name.split('.').pop()?.toLowerCase();
       const allowedTypes = ['pdf', 'txt', 'doc', 'docx', 'md'];
       const isValidExt = allowedTypes.includes(ext || '');
-      const isValidMime = file.type === 'application/pdf' || 
-                         file.type.startsWith('text/') ||
-                         file.type.includes('document') ||
-                         file.type.includes('word');
+      const isValidMime = file.type === 'application/pdf' ||
+        file.type.startsWith('text/') ||
+        file.type.includes('document') ||
+        file.type.includes('word');
       return isValidExt || isValidMime;
     });
   };
 
   const handleFilesSelected = async (files: File[]) => {
     const validFiles = validateFiles(files);
-    
+
     if (validFiles.length === 0 && files.length > 0) {
       alert('Only PDF, TXT, DOC, DOCX and MD files are allowed.');
       return;
@@ -138,16 +138,16 @@ export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitat
         }
 
         const result = await response.json();
-        
+
         // Create file metadata for successfully uploaded files
         const fileData: FileWithMetadata[] = validFiles.map((file, index) => ({
           file,
           uploadedAt: new Date(),
           status: result.successful?.[index] ? 'success' : 'error',
         }));
-        
+
         setUploadedFiles(prev => [...prev, ...fileData]);
-        
+
         // Show success message
         if (result.successful && result.successful.length > 0) {
           console.log(`Successfully uploaded ${result.successful.length} file(s)`);
@@ -220,14 +220,14 @@ export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitat
             return;
           } else {
             const data = await response.json();
-            console.log('Research response data:', { 
+            console.log('Research response data:', {
               answerLength: data.answer?.length,
               citationsCount: data.citations?.length,
               crawledWebsitesCount: data.crawled_websites?.length,
               crawledWebsites: data.crawled_websites,
               citations: data.citations
             });
-            
+
             // Log first citation URL for debugging
             if (data.citations && data.citations.length > 0) {
               console.log('First citation URL:', data.citations[0].url);
@@ -322,7 +322,7 @@ export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitat
 
               try {
                 const json = JSON.parse(data);
-                
+
                 if (json.type === 'error') {
                   errorOccurred = true;
                   assistantMessage.content = `Error: ${json.error || 'An error occurred'}`;
@@ -333,7 +333,7 @@ export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitat
                   });
                   break;
                 }
-                
+
                 if (json.type === 'text' && json.text) {
                   hasReceivedContent = true;
                   assistantMessage.content += json.text;
@@ -381,7 +381,7 @@ export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitat
       console.error('Chat error:', error);
       const errorMessage = error instanceof Error ? error.message : 'An error occurred. Please try again.';
       alert(errorMessage);
-      
+
       messageIdCounter.current += 1;
       const errorMsg: Message = {
         id: `error-${messageIdCounter.current}`,
@@ -412,7 +412,7 @@ export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitat
       )}
 
       {/* Messages Area */}
-      <div 
+      <div
         className="flex-1 overflow-y-auto px-6 py-6"
         ref={scrollRef}
       >
@@ -431,16 +431,14 @@ export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitat
           {messages.map((message) => (
             <div
               key={message.id}
-              className={`flex gap-4 ${
-                message.role === 'user' ? 'justify-end' : 'justify-start'
-              }`}
+              className={`flex gap-4 ${message.role === 'user' ? 'justify-end' : 'justify-start'
+                }`}
             >
               <div
-                className={`max-w-[80%] px-4 py-3 rounded-2xl ${
-                  message.role === 'user'
+                className={`max-w-[80%] px-4 py-3 rounded-2xl ${message.role === 'user'
                     ? 'bg-gray-900 text-white rounded-br-sm'
                     : 'bg-gray-100 text-gray-900 rounded-bl-sm'
-                }`}
+                  }`}
               >
                 <div className="text-sm leading-relaxed whitespace-pre-wrap">
                   {message.role === 'assistant' && message.citations && message.citations.length > 0 ? (
@@ -523,27 +521,26 @@ export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitat
             </Button>
 
             {/* Web Search Toggle */}
-          <Button
-            type="button"
-            variant={researchMode ? "default" : "outline"}
-            size="sm"
-            onClick={() => {
-              console.log('Web button clicked, researchMode:', researchMode);
-              setResearchMode(!researchMode);
-            }}
-            disabled={streaming || uploading}
-            className={`flex items-center gap-2 h-8 px-3 rounded-lg ${
-              researchMode 
-                ? 'bg-gray-900 text-white hover:bg-gray-800' 
-                : 'border border-gray-300 hover:bg-gray-50'
-            }`}
-            title={researchMode ? 'Web search enabled - will crawl websites' : 'Enable web search'}
-          >
-            <Globe className="h-3.5 w-3.5" />
-            <span className="text-xs font-medium">Web</span>
-          </Button>
+            <Button
+              type="button"
+              variant={researchMode ? "default" : "outline"}
+              size="sm"
+              onClick={() => {
+                console.log('Web button clicked, researchMode:', researchMode);
+                setResearchMode(!researchMode);
+              }}
+              disabled={streaming || uploading}
+              className={`flex items-center gap-2 h-8 px-3 rounded-lg ${researchMode
+                  ? 'bg-gray-900 text-white hover:bg-gray-800'
+                  : 'border border-gray-300 hover:bg-gray-50'
+                }`}
+              title={researchMode ? 'Web search enabled - will crawl websites' : 'Enable web search'}
+            >
+              <Globe className="h-3.5 w-3.5" />
+              <span className="text-xs font-medium">Web</span>
+            </Button>
           </div>
-          
+
           {uploadedFiles.length > 0 && (
             <span className="text-xs text-gray-500">
               {uploadedFiles.length} file{uploadedFiles.length > 1 ? 's' : ''}
