@@ -32,7 +32,8 @@ export function WooRequestsTable({ onViewDetails, onChat }: WooRequestsTableProp
     setError(null);
 
     try {
-      const response = await fetch('http://localhost:5001/api/woo-requests');
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5001';
+      const response = await fetch(`${backendUrl}/api/woo-requests`);
 
       if (!response.ok) {
         throw new Error('Failed to fetch WOO requests');

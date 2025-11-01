@@ -36,7 +36,8 @@ export function WooHistoryModal({ isOpen, onClose, wooRequest }: WooHistoryModal
     setError(null);
 
     try {
-      const response = await fetch('http://localhost:5001/api/woo-history', {
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5001';
+      const response = await fetch(`${backendUrl}/api/woo-history`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
