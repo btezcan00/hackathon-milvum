@@ -10,30 +10,9 @@ export default function Home() {
   const [isChatOpen, setIsChatOpen] = useState(false);
   const confettiRef = useRef<ConfettiRef>(null);
 
-  // Fire confetti every 1.5 seconds (but only when chat is closed)
-  useEffect(() => {
-    if (isChatOpen) return; // Don't start confetti if chat is open
-    
-    const interval = setInterval(() => {
-      confettiRef.current?.fire({
-        particleCount: 100,
-        spread: 70,
-        origin: { y: 0.6 }
-      });
-    }, 1500);
-
-    return () => clearInterval(interval);
-  }, [isChatOpen]); // Re-run when chat state changes
-
   return (
     <div className="min-h-screen bg-white relative">
-      {/* Confetti canvas - full screen */}
-      <Confetti
-        ref={confettiRef}
-        className="fixed top-0 left-0 w-full h-full pointer-events-none z-50"
-        manualstart
-      />
-      
+    
       {/* Simple header with Chat button */}
       <header className="border-b border-gray-200">
         <div className="max-w-full mx-auto px-6 py-4">
