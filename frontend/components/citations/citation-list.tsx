@@ -13,11 +13,17 @@ export interface Citation {
   crawledAt?: string;
   highlightText?: string;
   // PDF/document specific fields
-  type?: 'document' | 'web';
+  type?: 'document' | 'web' | 'government_dataset';
   pageNumbers?: number[];
   documentName?: string;
   date?: string;
   uploadedAt?: string;
+  // Government dataset specific fields
+  downloadUrl?: string;
+  publisher?: string;
+  format?: string;
+  publishedDate?: string;
+  modifiedDate?: string;
 }
 
 interface CitationListProps {

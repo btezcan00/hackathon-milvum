@@ -38,7 +38,7 @@ export function FilesPanel({ files, citations = [], selectedCitationUrl, onClose
     );
   }, [files]);
 
-  // Combine files and document citations into sources list (exclude web citations)
+    // Combine files and document citations into sources list (exclude web citations)
   const sources = useMemo(() => {
     const items: SourceItem[] = [];
 
@@ -47,10 +47,13 @@ export function FilesPanel({ files, citations = [], selectedCitationUrl, onClose
       items.push({ type: 'file', data: file, index });
     });
 
-    // Add only document citations (filter out web citations)
+    // Add document citations (only uploaded PDFs, NOT web/government datasets)
     citations.forEach((citation, index) => {
-      // Only include document citations, not web citations
-      if (citation.type === 'document' || (!citation.type && citation.domain === 'Internal Document')) {
+      // Only include internal uploaded documents (not web or government datasets)
+      // Government datasets should stay in citations list, not file panel
+      const isInternalDoc = citation.type === 'document' || (!citation.type && citation.domain === 'Internal Document');
+      
+      if (isInternalDoc) {
         items.push({ type: 'citation', data: citation, index });
       }
     });

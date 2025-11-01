@@ -4,6 +4,7 @@ import json
 from werkzeug.utils import secure_filename
 import os
 import asyncio
+import requests
 from dotenv import load_dotenv
 from services.rag_service import RAGService
 from services.llm_service import EmbeddingService, ChatService
@@ -545,17 +546,12 @@ def chat_plain():
     
 @app.route('/api/research', methods=['POST'])
 def research():
-    """Deep research endpoint - Crawl web sources and return answer with citations"""
+    """Government data research endpoint - Search Dutch government APIs and return answer with citations"""
     try:
         data = request.get_json()
         query = data.get('query', '')
         conversation_id = data.get('conversation_id', None)
-        max_results = data.get('max_results', 5)
-        # Legacy support: allow URLs to be provided, but prefer websites
-        urls = data.get('urls', [])
-        websites = data.get('websites', [])  # Optional: specific websites (domains) to crawl
-        domain_filter = data.get('domain_filter', [])
-        max_pages_per_website = data.get('max_pages_per_website', 10)  # Pages to crawl per website
+        max_results = data.get('max_results', 10)
         
         if not query:
             return jsonify({'error': 'Query is required'}), 400
@@ -567,245 +563,95 @@ def research():
         elif conversation_id not in conversations:
             conversations[conversation_id] = []
         
-        logger.info(f"Starting deep research for query: {query}")
+        logger.info(f"Starting government data research for query: {query}")
         
-        # Initialize web crawler
-        web_crawler = get_web_crawler()
+        # Import new services
+        from services.government_data_service import GovernmentDataService
+        from services.api_endpoint_selector import APIEndpointSelector
+        
+        # Initialize services
+        gov_data_service = GovernmentDataService()
+        api_selector = APIEndpointSelector(groq_service)
         
         try:
-            # Select websites using agent (or use provided websites/URLs)
-            selected_websites = []
+            # Step 1: AI agent selects API parameters based on query
+            logger.info("Using AI agent to select API parameters...")
+            api_params = api_selector.select_api_parameters(query)
+            logger.info(f"AI agent selected parameters: {api_params}")
             
-            if websites:
-                # Use provided websites
-                logger.info(f"Using {len(websites)} provided websites")
-                # Convert domains to website dicts
-                # Access unique_websites through a public method (we'll add one if needed)
-                unique_websites = getattr(url_selector, '_unique_websites', [])
-                domain_to_website = {w["domain"]: w for w in unique_websites}
-                for website_domain in websites:
-                    if website_domain in domain_to_website:
-                        selected_websites.append(domain_to_website[website_domain])
-                    else:
-                        # If it's a URL, extract domain and find matching website
-                        from urllib.parse import urlparse
-                        parsed = urlparse(website_domain if website_domain.startswith('http') else f'https://{website_domain}')
-                        domain = parsed.netloc.lower().replace('www.', '')
-                        if domain in domain_to_website:
-                            selected_websites.append(domain_to_website[domain])
-            elif urls:
-                # Legacy mode: convert URLs to websites
-                logger.info(f"Legacy mode: Converting {len(urls)} URLs to websites for multi-page crawling")
-                unique_websites = getattr(url_selector, '_unique_websites', [])
-                domain_to_website = {w["domain"]: w for w in unique_websites}
-                seen_domains = set()
-                for url in urls:
-                    from urllib.parse import urlparse
-                    parsed = urlparse(url)
-                    domain = parsed.netloc.lower().replace('www.', '')
-                    if domain in domain_to_website and domain not in seen_domains:
-                        selected_websites.append(domain_to_website[domain])
-                        seen_domains.add(domain)
-            else:
-                # Agent selects websites automatically
-                logger.info(f"No websites/URLs provided, agent selecting relevant websites for query: {query[:100]}...")
-                try:
-                    # Agent selects websites (default: 2 websites for focused crawling)
-                    max_websites = 2
-                    selected_websites = url_selector.select_websites(query, max_websites=max_websites)
-                except ValueError as e:
-                    # Groq-specific errors (API key issues, etc.)
-                    error_msg = str(e)
-                    logger.error(f"Agent website selection failed: {error_msg}")
-                    return jsonify({
-                        'error': f'Website selection failed: {error_msg}. Please ensure GROQ_API_KEY is set in your .env file.',
-                        'query': query,
-                        'conversation_id': conversation_id
-                    }), 400
-                except Exception as e:
-                    logger.error(f"Unexpected error in website selection: {str(e)}", exc_info=True)
-                    return jsonify({
-                        'error': f'Failed to select websites for crawling: {str(e)}',
-                        'query': query,
-                        'conversation_id': conversation_id
-                    }), 500
-            
-            if not selected_websites:
-                return jsonify({
-                    'error': 'Could not find relevant government websites for your query. Please try rephrasing your question.',
-                    'query': query,
-                    'conversation_id': conversation_id
-                }), 200
-            
-            logger.info(f"Agent selected {len(selected_websites)} websites for multi-page crawling")
-            for i, website in enumerate(selected_websites, 1):
-                logger.info(f"  [{i}] {website['domain']} (entry: {website['entry_url']})")
-            
-            # Filter by allowed domains if domain_filter provided
-            if domain_filter:
-                web_crawler.allowed_domains = domain_filter
-            
-            # Crawl each website for multiple pages
-            # Use a single event loop for both crawling and cleanup to avoid loop conflicts
-            logger.info(f"Starting multi-page crawl of {len(selected_websites)} websites for query: '{query[:100]}'...")
-            
-            # Create event loop for this request
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            crawled_content = []
-            
-            async def crawl_all_websites():
-                """Async function to crawl all selected websites in parallel"""
-                try:
-                    # Crawl all websites in parallel for faster execution
-                    logger.info(f"Starting parallel crawl of {len(selected_websites)} websites")
-                    
-                    async def crawl_single_website(website: Dict, index: int) -> List[Dict]:
-                        """Crawl a single website"""
-                        domain = website['domain']
-                        entry_url = website['entry_url']
-                        title = website.get('title', domain)
-                        
-                        logger.info(f"[Website {index+1}/{len(selected_websites)}] Starting multi-page crawl: {domain}")
-                        
-                        try:
-                            # Use multi-page crawling for this website
-                            website_content = await web_crawler.crawl_website_multi_page(
-                                entry_url=entry_url,
-                                query=query,
-                                max_pages=max_pages_per_website,
-                                depth=2  # Crawl entry page + linked pages
-                            )
-                            
-                            if website_content:
-                                logger.info(f"[Website {index+1}/{len(selected_websites)}] ✓ Crawled {len(website_content)} pages from {domain}")
-                                return website_content
-                            else:
-                                logger.warning(f"[Website {index+1}/{len(selected_websites)}] ✗ No content crawled from {domain}")
-                                return []
-                        except Exception as e:
-                            logger.error(f"[Website {index+1}/{len(selected_websites)}] ✗ Error crawling {domain}: {str(e)}")
-                            return []
-                    
-                    # Create tasks for all websites
-                    tasks = [crawl_single_website(website, i) for i, website in enumerate(selected_websites)]
-                    
-                    # Execute all website crawls in parallel
-                    results = await asyncio.gather(*tasks, return_exceptions=True)
-                    
-                    # Collect all results
-                    for i, result in enumerate(results):
-                        if isinstance(result, Exception):
-                            logger.error(f"Exception during crawl of website {selected_websites[i]['domain']}: {str(result)}")
-                        elif isinstance(result, list):
-                            crawled_content.extend(result)
-                    
-                    logger.info(f"Completed parallel crawl: {len(crawled_content)} total pages from {len(selected_websites)} websites")
-                    
-                finally:
-                    # Always clean up, even if crawling failed
-                    try:
-                        await web_crawler.close()
-                    except Exception as e:
-                        # Cleanup errors are non-critical - browser processes will be cleaned up by OS
-                        logger.debug(f"Non-critical cleanup error (browser will auto-cleanup): {str(e)}")
-            
-            try:
-                loop.run_until_complete(crawl_all_websites())
-            finally:
-                loop.close()
-                # Clear the event loop from thread-local storage
-                asyncio.set_event_loop(None)
-            
-            if not crawled_content:
-                logger.warning(f"No crawled content retrieved from {len(selected_websites)} websites")
-                return jsonify({
-                    'error': 'No content could be retrieved from the selected websites. The websites may be unreachable or blocking crawlers.',
-                    'query': query,
-                    'conversation_id': conversation_id,
-                    'websites_attempted': [w['domain'] for w in selected_websites],
-                    'crawled_websites': []
-                }), 200
-            
-            # Extract unique crawled pages with titles for display
-            crawled_websites = []
-            seen_urls = set()
-            domain_to_info = {}  # Track domain info
-            for content in crawled_content:
-                url = content.get('url', '')
-                domain = content.get('domain', '')
-                if url and url not in seen_urls:
-                    seen_urls.add(url)
-                    crawled_websites.append({
-                        'url': url,
-                        'title': content.get('title', ''),
-                        'domain': domain
-                    })
-                    # Track domain info
-                    if domain not in domain_to_info:
-                        domain_to_info[domain] = {
-                            'domain': domain,
-                            'pages_crawled': 0,
-                            'entry_url': url  # First URL seen for this domain
-                        }
-                    domain_to_info[domain]['pages_crawled'] += 1
-            
-            # Create summary of crawled websites (domains) with page counts
-            website_summary = []
-            for domain, info in domain_to_info.items():
-                website_summary.append({
-                    'domain': domain,
-                    'entry_url': info['entry_url'],
-                    'pages_crawled': info['pages_crawled']
-                })
-            
-            # Process citations: score, format, deduplicate
-            logger.info(f"Processing {len(crawled_content)} citations...")
-            citations = citation_service.process_citations(
-                query=query,
-                crawled_content=crawled_content,
-                top_k=max_results
+            # Step 2: Call government data API with selected parameters
+            logger.info(f"Searching data.overheid.nl API...")
+            clean_context, citations, metadata = gov_data_service.search_and_parse(
+                query=api_params['search_query'],
+                rows=api_params['rows'],
+                filters=api_params.get('filters'),
+                sort=api_params.get('sort')
             )
             
-            # Build context from citations
-            context_parts = []
-            for i, citation in enumerate(citations, 1):
-                context_parts.append(
-                    f"[{i}] Source: {citation['title']} ({citation['url']})\n"
-                    f"Snippet: {citation['snippet']}\n"
-                )
-            context = "\n\n".join(context_parts)
+            # Check if search was successful
+            if not metadata.get('success'):
+                error_msg = metadata.get('error', 'Unknown error')
+                logger.error(f"API search failed: {error_msg}")
+                return jsonify({
+                    'error': f'Failed to search government data: {error_msg}',
+                    'query': query,
+                    'conversation_id': conversation_id
+                }), 500
             
-            # Build conversation history for LLM
+            if not citations:
+                logger.warning(f"No results found for query: {query}")
+                return jsonify({
+                    'error': 'Geen resultaten gevonden. Probeer uw zoekopdracht te herformuleren.',
+                    'query': query,
+                    'conversation_id': conversation_id,
+                    'total_count': metadata.get('total_count', 0)
+                }), 200
+            
+            logger.info(f"Found {metadata.get('total_count', 0)} total results, using {len(citations)} citations")
+            
+            # Step 3: Build LLM prompt with CLEAN CONTEXT ONLY (no metadata!)
+            # This is critical - LLM receives only readable text, no JSON, no API structure
             messages = [
                 {
                     "role": "system",
-                    "content": "You are a helpful assistant that provides answers based on web sources. Always cite your sources using [1], [2], etc. format when referencing information from the provided context. If the context doesn't contain relevant information, say so. IMPORTANT: Do NOT use markdown formatting. Write in plain text without **bold**, *italic*, lists with `-` or `#` headers. Use regular paragraphs and normal text formatting."
+                    "content": """Je bent een expert assistent die vragen beantwoordt op basis van Nederlandse overheidsinformatie.
+
+Je taak:
+1. Beantwoord de vraag van de gebruiker op basis van de verstrekte bronnen
+2. Citeer specifieke informatie met [1], [2], etc. formaat
+3. Als de bronnen niet voldoende informatie bevatten, zeg dit eerlijk
+4. Blijf professioneel en helder in je uitleg
+5. Gebruik eerdere berichten in het gesprek om context te behouden
+
+BELANGRIJK: Gebruik GEEN markdown opmaak. Schrijf in gewone tekst zonder:
+- **bold** of *italic* opmaak
+- Lijsten met `-`, `*`, of genummerde lijsten met markdown
+- Headers met `#`
+- Code blocks met backticks
+
+Schrijf gewone alinea's met normale tekst. Gebruik citaties [1], [2], etc. om naar bronnen te verwijzen."""
                 }
             ]
             
             # Add conversation history
             messages.extend(conversations[conversation_id])
             
-            # Build website summary for context
-            website_list = []
-            for i, site in enumerate(website_summary, 1):
-                website_list.append(f"[Website {i}] {site['domain']} ({site['pages_crawled']} pages crawled)")
-            websites_context = "\n".join(website_list) if website_list else ""
-            
-            # Add current query with context
-            user_content = f"Web Sources Context:\n{context}\n\n"
-            if websites_context:
-                user_content += f"Websites crawled:\n{websites_context}\n\n"
-            user_content += f"User question: {query}\n\nProvide an answer based on the sources above, citing them with [1], [2], etc. Also mention which websites were crawled at the end of your answer. Write in plain text without markdown formatting - no **bold**, no *italic*, no lists with `-` or `#` headers. Use regular paragraphs and normal text."
+            # Add current query with CLEAN context (no metadata!)
+            user_content = f"""Bronnen uit data.overheid.nl:
+
+{clean_context}
+
+Vraag van gebruiker: {query}
+
+Geef een helder antwoord op basis van de bovenstaande bronnen. Gebruik [1], [2], etc. om naar de bronnen te verwijzen. Schrijf in gewone tekst zonder markdown opmaak."""
             
             messages.append({
                 "role": "user",
                 "content": user_content
             })
             
-            # Generate answer using ChatService
-            logger.info("Generating LLM answer...")
+            # Step 4: Generate answer using ChatService
+            logger.info("Generating LLM answer with clean context...")
             answer = chat_service.chat(messages)
             
             # Store this exchange in conversation history
@@ -822,30 +668,20 @@ def research():
             if len(conversations[conversation_id]) > 20:
                 conversations[conversation_id] = conversations[conversation_id][-20:]
             
-            # Prepare selected websites info for frontend display
-            selected_websites_info = [
-                {
-                    'domain': w['domain'],
-                    'title': w.get('title', w['domain']),
-                    'entry_url': w['entry_url']
-                }
-                for w in selected_websites
-            ]
-            
-            # Return response with citations and crawled websites
+            # Step 5: Return response with answer and FULL citations (with metadata)
             response_data = {
                 'answer': answer,
-                'citations': citations,
-                'crawled_websites': crawled_websites,  # List of pages that were crawled
-                'website_summary': website_summary,  # Summary of websites with page counts
-                'selected_websites': selected_websites_info,  # Info about websites selected for crawling
+                'citations': citations,  # Full citation objects with all metadata
                 'query': query,
                 'conversation_id': conversation_id,
                 'message_count': len(conversations[conversation_id]),
                 'citations_count': len(citations),
-                'total_pages_crawled': len(crawled_websites)
+                'total_count': metadata.get('total_count', 0),
+                'source': 'data.overheid.nl',
+                'search_query': api_params['search_query']
             }
-            logger.info(f"Research response: answer_length={len(answer)}, citations={len(citations)}, websites={len(crawled_websites)}")
+            
+            logger.info(f"Research response: answer_length={len(answer)}, citations={len(citations)}, total_available={metadata.get('total_count', 0)}")
             return jsonify(response_data), 200
         
         except Exception as e:
@@ -854,6 +690,69 @@ def research():
     
     except Exception as e:
         logger.error(f"Error processing research request: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/proxy-document', methods=['GET'])
+def proxy_document():
+    """
+    Proxy government documents to avoid CORS issues
+    Fetches PDFs/documents from data.overheid.nl and serves them to frontend
+    """
+    try:
+        document_url = request.args.get('url')
+        
+        if not document_url:
+            return jsonify({'error': 'URL parameter is required'}), 400
+        
+        # Validate URL is from trusted government sources
+        trusted_domains = [
+            'data.overheid.nl',
+            'open-overheid.nl',
+            'officielebekendmakingen.nl',
+            'rijksoverheid.nl',
+            'cbs.nl'
+        ]
+        
+        from urllib.parse import urlparse
+        parsed_url = urlparse(document_url)
+        is_trusted = any(domain in parsed_url.netloc for domain in trusted_domains)
+        
+        if not is_trusted:
+            logger.warning(f"Attempted to proxy non-trusted URL: {document_url}")
+            return jsonify({'error': 'URL not from trusted government source'}), 403
+        
+        logger.info(f"Proxying document from: {document_url}")
+        
+        # Fetch the document
+        response = requests.get(document_url, timeout=30, stream=True)
+        response.raise_for_status()
+        
+        # Get content type
+        content_type = response.headers.get('Content-Type', 'application/pdf')
+        
+        # Stream the response back to client
+        def generate():
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    yield chunk
+        
+        return Response(
+            generate(),
+            content_type=content_type,
+            headers={
+                'Content-Disposition': response.headers.get('Content-Disposition', 'inline'),
+                'Access-Control-Allow-Origin': '*'
+            }
+        )
+        
+    except requests.exceptions.Timeout:
+        logger.error(f"Timeout while fetching document: {document_url}")
+        return jsonify({'error': 'Document request timeout'}), 504
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error fetching document: {str(e)}")
+        return jsonify({'error': f'Failed to fetch document: {str(e)}'}), 502
+    except Exception as e:
+        logger.error(f"Error proxying document: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/documents', methods=['GET'])

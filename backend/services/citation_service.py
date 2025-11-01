@@ -175,6 +175,29 @@ class CitationService:
                     'crawledAt': content.get('extracted_at', datetime.now().isoformat()),
                     'highlightText': content.get('text', '')  # Full text for PDF highlighting
                 }
+                
+                # Add optional downloadUrl field for government datasets
+                if 'downloadUrl' in content and content['downloadUrl']:
+                    citation['downloadUrl'] = content['downloadUrl']
+                
+                # Add optional publisher/organization field
+                if 'publisher' in content and content['publisher']:
+                    citation['publisher'] = content['publisher']
+                
+                # Add optional format field
+                if 'format' in content and content['format']:
+                    citation['format'] = content['format']
+                
+                # Add optional type field (e.g., 'government_dataset', 'web_page')
+                if 'type' in content and content['type']:
+                    citation['type'] = content['type']
+                
+                # Add optional published/modified dates
+                if 'publishedDate' in content and content['publishedDate']:
+                    citation['publishedDate'] = content['publishedDate']
+                if 'modifiedDate' in content and content['modifiedDate']:
+                    citation['modifiedDate'] = content['modifiedDate']
+                
                 citations.append(citation)
             except Exception as e:
                 logger.error(f"Error formatting citation: {str(e)}")
