@@ -361,6 +361,12 @@ export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitat
       } else {
         // Handle JSON response (non-streaming)
         const data = await response.json();
+        console.log('Chat response data:', {
+          answerLength: data.answer?.length,
+          citationsCount: data.citations?.length,
+          citations: data.citations,
+          mode: data.mode
+        });
         messageIdCounter.current += 1;
         const assistantMessage: Message = {
           id: `assistant-${messageIdCounter.current}`,
@@ -369,6 +375,7 @@ export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitat
           citations: data.citations || [],  // Include PDF citations
         };
         setMessages(prev => [...prev, assistantMessage]);
+        setStreaming(false);
       }
     } catch (error) {
       console.error('Chat error:', error);

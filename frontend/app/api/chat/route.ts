@@ -51,10 +51,20 @@ export async function POST(req: Request) {
         },
       });
     } else {
-      // Handle non-streaming response (fallback)
+      // Handle non-streaming JSON response
       const data = await backendResponse.json();
+      
+      // If it's a JSON response with answer and citations, return as JSON (not stream)
+      if (data.answer && typeof data.answer === 'string') {
+        return new Response(JSON.stringify(data), {
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
+      }
+      
+      // Fallback: convert to stream
       const encoder = new TextEncoder();
-
       const stream = new ReadableStream({
         start(controller) {
           const answer = data.answer || 'Ik kon geen antwoord vinden op uw vraag.';

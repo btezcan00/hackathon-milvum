@@ -78,7 +78,7 @@ export function InlineCitations({ content, citations, onCitationClick }: InlineC
                 onCitationClick(citation, part.index!);
               }}
               className="inline-flex items-center justify-center px-1.5 py-0.5 mx-0.5 text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-sm transition-colors cursor-pointer underline decoration-1 underline-offset-2"
-              title={`Source: ${citation.title}`}
+              title={`${citation.type === 'document' ? 'Document' : 'Web'} source: ${citation.title}${citation.pageNumbers ? ` (Pages ${citation.pageNumbers.join(', ')})` : ''}`}
             >
               [{part.index! + 1}]
             </button>
