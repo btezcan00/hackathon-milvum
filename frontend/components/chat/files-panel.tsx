@@ -309,7 +309,7 @@ export function FilesPanel({ files, citations = [], selectedCitationUrl, onClose
       {/* Content: Sidebar + PDF Viewer */}
       <div className="flex-1 flex overflow-hidden">
         {/* Sources List Sidebar */}
-        <div className="w-64 border-r border-gray-300 bg-gray-50 flex flex-col overflow-hidden">
+        <div className="w-64 flex-shrink-0 flex-grow-0 border-r border-gray-300 bg-gray-50 flex flex-col overflow-hidden">
           <div className="px-3 py-2 border-b border-gray-200 bg-white">
             <p className="text-xs font-medium text-gray-600">Sources</p>
           </div>

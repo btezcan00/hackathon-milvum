@@ -454,7 +454,7 @@ export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitat
                       }}
                     />
                   ) : (
-                    <p>{message.content}</p>
+                    <div className="whitespace-pre-wrap">{message.content}</div>
                   )}
                 </div>
                 {message.role === 'assistant' && message.citations && message.citations.length > 0 && (

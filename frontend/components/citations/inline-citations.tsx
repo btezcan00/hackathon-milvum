@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import React, { useMemo } from 'react';
 import type { Citation } from './citation-list';
 
 interface InlineCitationsProps {
@@ -66,7 +66,17 @@ export function InlineCitations({ content, citations, onCitationClick }: InlineC
     <>
       {parsedContent.map((part, i) => {
         if (part.type === 'text') {
-          return <span key={i}>{part.content}</span>;
+          // Preserve line breaks in text
+          return (
+            <span key={i}>
+              {part.content?.split('\n').map((line, lineIndex, lines) => (
+                <React.Fragment key={lineIndex}>
+                  {line}
+                  {lineIndex < lines.length - 1 && <br />}
+                </React.Fragment>
+              ))}
+            </span>
+          );
         } else {
           const citation = citations[part.index!];
           return (

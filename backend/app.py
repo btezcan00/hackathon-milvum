@@ -275,7 +275,7 @@ def chat():
             messages = [
                 {
                     "role": "system",
-                    "content": "Je bent een behulpzame assistent voor de Nederlandse overheid (WOO - Wet open overheid). Beantwoord vragen op een heldere, professionele en toegankelijke manier. Onthoud eerdere berichten in het gesprek en ga natuurlijk verder met de conversatie."
+                    "content": "Je bent een behulpzame assistent voor de Nederlandse overheid (WOO - Wet open overheid). Beantwoord vragen op een heldere, professionele en toegankelijke manier. Onthoud eerdere berichten in het gesprek en ga natuurlijk verder met de conversatie. Gebruik GEEN markdown opmaak - schrijf in gewone tekst zonder **bold**, *italic*, lijsten met `-` of `#` headers. Gebruik gewone nummers en normale alinea's."
                 }
             ]
             messages.extend(conversations[conversation_id])
@@ -319,7 +319,13 @@ Je taak:
 4. Blijf professioneel en helder in je uitleg
 5. Gebruik eerdere berichten in het gesprek om context te behouden
 
-Antwoord altijd in het Nederlands. Gebruik citaties [1], [2], etc. om naar documenten te verwijzen."""
+BELANGRIJK: Gebruik GEEN markdown opmaak. Schrijf in gewone tekst zonder:
+- **bold** of *italic* opmaak
+- Lijsten met `-`, `*`, of genummerde lijsten met `1.`
+- Headers met `#`
+- Code blocks met backticks
+
+Schrijf gewone alinea's met normale tekst. Gebruik gewone nummers zoals "1.", "2." zonder markdown opmaak. Gebruik citaties [1], [2], etc. om naar documenten te verwijzen. Antwoord altijd in het Nederlands."""
                 }
             ]
             
@@ -331,7 +337,7 @@ Antwoord altijd in het Nederlands. Gebruik citaties [1], [2], etc. om naar docum
 
 Vraag van gebruiker: {query}
 
-Geef een helder antwoord op basis van de bovenstaande context. Gebruik [1], [2], etc. om naar de documenten te verwijzen."""
+Geef een helder antwoord op basis van de bovenstaande context. Gebruik [1], [2], etc. om naar de documenten te verwijzen. Schrijf in gewone tekst zonder markdown opmaak. Gebruik een lege regel tussen genummerde items voor betere leesbaarheid."""
             })
             
             answer = chat_service.chat(messages)
@@ -623,7 +629,7 @@ def research():
             messages = [
                 {
                     "role": "system",
-                    "content": "You are a helpful assistant that provides answers based on web sources. Always cite your sources using [1], [2], etc. format when referencing information from the provided context. If the context doesn't contain relevant information, say so."
+                    "content": "You are a helpful assistant that provides answers based on web sources. Always cite your sources using [1], [2], etc. format when referencing information from the provided context. If the context doesn't contain relevant information, say so. IMPORTANT: Do NOT use markdown formatting. Write in plain text without **bold**, *italic*, lists with `-` or `#` headers. Use regular paragraphs and normal text formatting."
                 }
             ]
             
@@ -640,7 +646,7 @@ def research():
             user_content = f"Web Sources Context:\n{context}\n\n"
             if websites_context:
                 user_content += f"Websites crawled:\n{websites_context}\n\n"
-            user_content += f"User question: {query}\n\nProvide an answer based on the sources above, citing them with [1], [2], etc. Also mention which websites were crawled at the end of your answer."
+            user_content += f"User question: {query}\n\nProvide an answer based on the sources above, citing them with [1], [2], etc. Also mention which websites were crawled at the end of your answer. Write in plain text without markdown formatting - no **bold**, no *italic*, no lists with `-` or `#` headers. Use regular paragraphs and normal text."
             
             messages.append({
                 "role": "user",
