@@ -256,6 +256,130 @@ class GovernmentDataService:
         
         return clean_context, citations
     
+    def search_and_parse_with_retry(
+        self,
+        query: str,
+        rows: int = 10,
+        filters: Optional[Dict[str, str]] = None,
+        sort: Optional[str] = None
+    ) -> tuple[str, List[Dict[str, Any]], Dict[str, Any]]:
+        """
+        Smart search with automatic retry strategies when 0 results found
+        
+        Tries multiple approaches:
+        1. Original query
+        2. Query without sort (broader search)
+        3. Individual words from query (fallback)
+        4. Remove filters (even broader)
+        
+        Args:
+            query: Search query
+            rows: Number of results
+            filters: Optional filters
+            sort: Optional sort parameter
+            
+        Returns:
+            Tuple of (clean_context, citations, metadata)
+        """
+        attempts = []
+        
+        # Strategy 1: Original query
+        attempts.append({
+            'query': query,
+            'filters': filters,
+            'sort': sort,
+            'strategy': 'original'
+        })
+        
+        # Strategy 2: Remove sort if present (sometimes sorting reduces results)
+        if sort:
+            attempts.append({
+                'query': query,
+                'filters': filters,
+                'sort': None,
+                'strategy': 'no_sort'
+            })
+        
+        # Strategy 3: Simplify query (take first 2-3 words)
+        words = query.split()
+        if len(words) > 2:
+            simplified_query = ' '.join(words[:2])
+            attempts.append({
+                'query': simplified_query,
+                'filters': filters,
+                'sort': None,
+                'strategy': 'simplified'
+            })
+        
+        # Strategy 4: Remove filters (broadest search)
+        if filters:
+            attempts.append({
+                'query': query,
+                'filters': None,
+                'sort': None,
+                'strategy': 'no_filters'
+            })
+        
+        # Strategy 5: Single most important word
+        if len(words) > 1:
+            # Take longest word (usually most specific)
+            main_word = max(words, key=len)
+            attempts.append({
+                'query': main_word,
+                'filters': None,
+                'sort': None,
+                'strategy': 'single_word'
+            })
+        
+        # Try each strategy until we get results
+        for i, attempt in enumerate(attempts):
+            logger.info(f"Attempt {i+1}/{len(attempts)} with strategy '{attempt['strategy']}': query='{attempt['query']}'")
+            
+            search_result = self.search_datasets(
+                query=attempt['query'],
+                rows=rows,
+                filters=attempt.get('filters'),
+                sort=attempt.get('sort')
+            )
+            
+            if not search_result.get('success'):
+                logger.warning(f"Attempt {i+1} failed: {search_result.get('error')}")
+                continue
+            
+            results = search_result.get('results', [])
+            
+            if results:
+                # Success! Parse and return
+                clean_context, citations = self.parse_results_to_clean_context_and_citations(results)
+                
+                metadata = {
+                    'success': True,
+                    'total_count': search_result.get('count', 0),
+                    'returned_count': len(citations),
+                    'query': attempt['query'],
+                    'original_query': query,
+                    'strategy_used': attempt['strategy'],
+                    'attempts': i + 1
+                }
+                
+                if attempt['strategy'] != 'original':
+                    logger.info(f"✓ Found {len(citations)} results using '{attempt['strategy']}' strategy (query: '{attempt['query']}')")
+                
+                return clean_context, citations, metadata
+            else:
+                logger.info(f"Attempt {i+1} returned 0 results, trying next strategy...")
+        
+        # All strategies failed
+        logger.warning(f"All {len(attempts)} search strategies returned 0 results for: {query}")
+        return "", [], {
+            'success': True,
+            'total_count': 0,
+            'returned_count': 0,
+            'query': query,
+            'strategy_used': 'all_failed',
+            'attempts': len(attempts)
+        }
+    
     def search_and_parse(
         self,
         query: str,
@@ -264,7 +388,7 @@ class GovernmentDataService:
         sort: Optional[str] = None
     ) -> tuple[str, List[Dict[str, Any]], Dict[str, Any]]:
         """
-        High-level method: Search and parse in one call
+        High-level method: Search and parse in one call with smart retry
         
         Args:
             query: Search query
@@ -276,36 +400,8 @@ class GovernmentDataService:
             Tuple of (clean_context, citations, metadata)
             metadata includes: total_count, query_info, etc.
         """
-        # Search API
-        search_result = self.search_datasets(
-            query=query,
-            rows=rows,
-            filters=filters,
-            sort=sort
-        )
-        
-        if not search_result.get('success'):
-            error_msg = search_result.get('error', 'Unknown error')
-            logger.error(f"Search failed: {error_msg}")
-            return "", [], {
-                'success': False,
-                'error': error_msg,
-                'total_count': 0
-            }
-        
-        # Parse results
-        results = search_result.get('results', [])
-        clean_context, citations = self.parse_results_to_clean_context_and_citations(results)
-        
-        # Build metadata
-        metadata = {
-            'success': True,
-            'total_count': search_result.get('count', 0),
-            'returned_count': len(citations),
-            'query': query
-        }
-        
-        return clean_context, citations, metadata
+        # Use retry logic by default
+        return self.search_and_parse_with_retry(query, rows, filters, sort)
     
     def close(self):
         """Close the session"""

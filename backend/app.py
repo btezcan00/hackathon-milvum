@@ -600,12 +600,22 @@ def research():
             
             if not citations:
                 logger.warning(f"No results found for query: {query}")
+                # Show how many attempts were made
+                attempts = metadata.get('attempts', 1)
                 return jsonify({
-                    'error': 'Geen resultaten gevonden. Probeer uw zoekopdracht te herformuleren.',
+                    'error': f'Geen resultaten gevonden na {attempts} zoekpogingen. Probeer andere zoektermen in het Nederlands.',
                     'query': query,
                     'conversation_id': conversation_id,
-                    'total_count': metadata.get('total_count', 0)
+                    'total_count': metadata.get('total_count', 0),
+                    'attempts': attempts
                 }), 200
+            
+            # Log which strategy worked
+            strategy = metadata.get('strategy_used', 'original')
+            original_query = metadata.get('original_query', query)
+            
+            if strategy != 'original':
+                logger.info(f"✓ Found results using '{strategy}' strategy: '{metadata.get('query')}' (original: '{original_query}')")
             
             logger.info(f"Found {metadata.get('total_count', 0)} total results, using {len(citations)} citations")
             
@@ -678,7 +688,9 @@ Geef een helder antwoord op basis van de bovenstaande bronnen. Gebruik [1], [2],
                 'citations_count': len(citations),
                 'total_count': metadata.get('total_count', 0),
                 'source': 'data.overheid.nl',
-                'search_query': api_params['search_query']
+                'search_query': metadata.get('query', api_params['search_query']),  # Actual query used
+                'original_query': original_query if strategy != 'original' else None,
+                'strategy_used': strategy if strategy != 'original' else None
             }
             
             logger.info(f"Research response: answer_length={len(answer)}, citations={len(citations)}, total_available={metadata.get('total_count', 0)}")
