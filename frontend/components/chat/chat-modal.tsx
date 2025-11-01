@@ -76,12 +76,20 @@ export function ChatModal({ isOpen, onClose }: ChatModalProps) {
   }, []);
 
   const handleCitationClick = (citation: Citation) => {
-    // Open files panel if not open
-    if (!showFilesPanel) {
-      setShowFilesPanel(true);
+    // Check if it's a web citation (government dataset or web type)
+    const isWebCitation = citation.type === 'government_dataset' || citation.type === 'web';
+    
+    if (isWebCitation) {
+      // For web citations: open link in new tab, don't open file panel
+      window.open(citation.url, '_blank', 'noopener,noreferrer');
+    } else {
+      // For document citations: open files panel
+      if (!showFilesPanel) {
+        setShowFilesPanel(true);
+      }
+      // Select the clicked citation
+      setSelectedCitationUrl(citation.url);
     }
-    // Select the clicked citation
-    setSelectedCitationUrl(citation.url);
   };
 
   return (
