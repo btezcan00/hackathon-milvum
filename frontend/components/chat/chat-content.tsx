@@ -542,15 +542,15 @@ export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitat
               size="sm"
               onClick={openFileDialog}
               disabled={streaming || uploading}
-              className="h-8 px-3 rounded-lg border border-gray-300 hover:bg-gray-50"
+              className="h-8 px-3 rounded-lg border border-gray-300 hover:bg-gray-50 text-sm"
             >
               {uploading ? (
                 <>
                   <Loader2 className="h-3.5 w-3.5 animate-spin mr-2" />
-                  Uploaden...
+                  <span className="text-sm">Uploaden...</span>
                 </>
               ) : (
-                'Bestanden uploaden'
+                <span className="text-sm">Bestanden uploaden</span>
               )}
             </Button>
 
@@ -571,7 +571,7 @@ export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitat
               title={researchMode ? 'Web search enabled - will crawl websites' : 'Enable web search'}
             >
               <Globe className="h-3.5 w-3.5" />
-              <span className="text-xs font-medium">Web</span>
+              <span className="text-sm font-medium">Web</span>
             </Button>
           </div>
 
