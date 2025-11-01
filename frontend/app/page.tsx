@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ChatModal } from "@/components/chat/chat-modal";
+import { AnimatedBeamMultipleOutputDemo } from "@/components/animated-beam-demo";
 
 export default function Home() {
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -25,7 +26,7 @@ export default function Home() {
 
       {/* Main content - completely white */}
       <main className="h-full bg-white">
-      <div className="flex justify-center items-center gap-10 py-16">
+      <div className="flex justify-center items-center gap-10 pt-16 pb-4">
         <img
           src="/milvum-logo.png"
           alt="Milvum logo"
@@ -39,6 +40,11 @@ export default function Home() {
           style={{ height: '128px' }}
         />
       </div>
+      
+      {/* <div className="flex flex-col justify-center items-center">
+
+        <AnimatedBeamMultipleOutputDemo />
+      </div> */}
       </main>
 
       {/* Chat Modal */}

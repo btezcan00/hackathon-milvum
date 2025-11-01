@@ -6,12 +6,15 @@ import { Loader2, Globe } from 'lucide-react';
 import { useRef, useEffect, useState } from 'react';
 import { CitationList, type Citation } from '@/components/citations/citation-list';
 import { createHighlightUrl } from '@/components/citations/citation-highlighter';
+import { InlineCitations } from '@/components/citations/inline-citations';
 import { CrawledWebsitesList } from '@/components/crawled-websites/crawled-websites-list';
 import type { FileWithMetadata } from './files-panel';
 
 interface ChatContentProps {
   onClose: () => void;
   onFilesChange: (files: FileWithMetadata[]) => void;
+  onCitationsChange?: (citations: Citation[]) => void;
+  onCitationClick?: (citation: Citation) => void;
   hideHeader?: boolean;
 }
 
@@ -29,7 +32,7 @@ interface Message {
   crawledWebsites?: CrawledWebsite[];
 }
 
-export function ChatContent({ onClose, onFilesChange, hideHeader = false }: ChatContentProps) {
+export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitationClick, hideHeader = false }: ChatContentProps) {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [uploadedFiles, setUploadedFiles] = useState<FileWithMetadata[]>([]);
@@ -46,9 +49,52 @@ export function ChatContent({ onClose, onFilesChange, hideHeader = false }: Chat
     }
   }, [messages]);
 
+  // Use ref to track previous files to avoid infinite loops
+  const prevFilesRef = useRef<FileWithMetadata[]>([]);
+  
   useEffect(() => {
-    onFilesChange(uploadedFiles);
+    // Only call onFilesChange if files actually changed
+    const filesChanged = uploadedFiles.length !== prevFilesRef.current.length ||
+      uploadedFiles.some((file, index) => {
+        const prevFile = prevFilesRef.current[index];
+        return !prevFile || file.file.name !== prevFile.file.name || file.file.size !== prevFile.file.size;
+      });
+
+    if (filesChanged) {
+      prevFilesRef.current = uploadedFiles;
+      onFilesChange(uploadedFiles);
+    }
   }, [uploadedFiles, onFilesChange]);
+
+  // Collect all citations from all messages and pass to parent
+  const prevMessagesRef = useRef<Message[]>([]);
+  
+  useEffect(() => {
+    if (onCitationsChange) {
+      // Only process if messages actually changed
+      const messagesChanged = messages.length !== prevMessagesRef.current.length ||
+        messages.some((msg, index) => {
+          const prevMsg = prevMessagesRef.current[index];
+          return !prevMsg || msg.id !== prevMsg.id || 
+                 (msg.citations?.length || 0) !== (prevMsg.citations?.length || 0);
+        });
+
+      if (messagesChanged) {
+        prevMessagesRef.current = messages;
+        const allCitations: Citation[] = [];
+        messages.forEach(message => {
+          if (message.citations && message.citations.length > 0) {
+            allCitations.push(...message.citations);
+          }
+        });
+        // Deduplicate by URL
+        const uniqueCitations = Array.from(
+          new Map(allCitations.map(c => [c.url, c])).values()
+        );
+        onCitationsChange(uniqueCitations);
+      }
+    }
+  }, [messages, onCitationsChange]);
 
   const validateFiles = (files: File[]): File[] => {
     return files.filter(file => {
@@ -178,8 +224,15 @@ export function ChatContent({ onClose, onFilesChange, hideHeader = false }: Chat
               answerLength: data.answer?.length,
               citationsCount: data.citations?.length,
               crawledWebsitesCount: data.crawled_websites?.length,
-              crawledWebsites: data.crawled_websites
+              crawledWebsites: data.crawled_websites,
+              citations: data.citations
             });
+            
+            // Log first citation URL for debugging
+            if (data.citations && data.citations.length > 0) {
+              console.log('First citation URL:', data.citations[0].url);
+              console.log('All citation URLs:', data.citations.map((c: Citation) => c.url));
+            }
             messageIdCounter.current += 1;
             const assistantMessage: Message = {
               id: `assistant-${messageIdCounter.current}`,
@@ -378,17 +431,32 @@ export function ChatContent({ onClose, onFilesChange, hideHeader = false }: Chat
                     : 'bg-gray-100 text-gray-900 rounded-bl-sm'
                 }`}
               >
-                <p className="text-sm leading-relaxed whitespace-pre-wrap">
-                  {message.content}
-                </p>
+                <div className="text-sm leading-relaxed whitespace-pre-wrap">
+                  {message.role === 'assistant' && message.citations && message.citations.length > 0 ? (
+                    <InlineCitations
+                      content={message.content}
+                      citations={message.citations}
+                      onCitationClick={(citation) => {
+                        if (onCitationClick) {
+                          onCitationClick(citation);
+                        }
+                      }}
+                    />
+                  ) : (
+                    <p>{message.content}</p>
+                  )}
+                </div>
                 {message.role === 'assistant' && message.citations && message.citations.length > 0 && (
-                  <CitationList
-                    citations={message.citations}
-                    onCitationClick={(citation) => {
-                      const url = createHighlightUrl(citation);
-                      window.open(url, '_blank');
-                    }}
-                  />
+                  <div className="mt-3 pt-3 border-t border-gray-200">
+                    <CitationList
+                      citations={message.citations}
+                      onCitationClick={(citation) => {
+                        if (onCitationClick) {
+                          onCitationClick(citation);
+                        }
+                      }}
+                    />
+                  </div>
                 )}
                 {message.role === 'assistant' && message.crawledWebsites && message.crawledWebsites.length > 0 && (
                   <CrawledWebsitesList websites={message.crawledWebsites} />
@@ -513,6 +581,7 @@ export function ChatContent({ onClose, onFilesChange, hideHeader = false }: Chat
           </Button>
         </form>
       </div>
+
     </div>
   );
 }

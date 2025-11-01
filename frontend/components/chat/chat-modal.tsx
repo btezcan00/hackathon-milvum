@@ -1,11 +1,12 @@
 'use client';
 
 import { motion, AnimatePresence } from 'framer-motion';
-import { useState } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { ChatContent } from './chat-content';
 import { FilesPanel } from './files-panel';
 import type { FileWithMetadata } from './files-panel';
+import type { Citation } from '@/components/citations/citation-list';
 
 interface ChatModalProps {
   isOpen: boolean;
@@ -14,11 +15,61 @@ interface ChatModalProps {
 
 export function ChatModal({ isOpen, onClose }: ChatModalProps) {
   const [uploadedFiles, setUploadedFiles] = useState<FileWithMetadata[]>([]);
+  const [citations, setCitations] = useState<Citation[]>([]);
   const [showFilesPanel, setShowFilesPanel] = useState(false);
+  const [selectedCitationUrl, setSelectedCitationUrl] = useState<string | undefined>(undefined);
 
-  const handleFilesChange = (files: FileWithMetadata[]) => {
-    setUploadedFiles(files);
-    setShowFilesPanel(files.length > 0);
+  // Use refs to track previous values to avoid infinite loops
+  const prevFilesRef = useRef<FileWithMetadata[]>([]);
+  const prevCitationsRef = useRef<Citation[]>([]);
+
+  const handleFilesChange = useCallback((files: FileWithMetadata[]) => {
+    // Only update if files actually changed
+    const filesChanged = files.length !== prevFilesRef.current.length ||
+      files.some((file, index) => {
+        const prevFile = prevFilesRef.current[index];
+        return !prevFile || file.file.name !== prevFile.file.name || file.file.size !== prevFile.file.size;
+      });
+
+    if (filesChanged) {
+      prevFilesRef.current = files;
+      setUploadedFiles(files);
+      // Show panel if we have files OR citations
+      setShowFilesPanel(prev => {
+        const hasFiles = files.length > 0;
+        const hasCitations = prevCitationsRef.current.length > 0;
+        return hasFiles || hasCitations;
+      });
+    }
+  }, []);
+
+  const handleCitationsChange = useCallback((newCitations: Citation[]) => {
+    // Only update if citations actually changed
+    const citationsChanged = newCitations.length !== prevCitationsRef.current.length ||
+      newCitations.some((citation, index) => {
+        const prevCitation = prevCitationsRef.current[index];
+        return !prevCitation || citation.url !== prevCitation.url;
+      });
+
+    if (citationsChanged) {
+      prevCitationsRef.current = newCitations;
+      setCitations(newCitations);
+      // Show panel if we have files OR citations
+      setShowFilesPanel(prev => {
+        const hasFiles = prevFilesRef.current.length > 0;
+        const hasCitations = newCitations.length > 0;
+        return hasFiles || hasCitations;
+      });
+    }
+  }, []);
+
+  const handleCitationClick = (citation: Citation) => {
+    // Open files panel if not open
+    if (!showFilesPanel) {
+      setShowFilesPanel(true);
+    }
+    // Select the clicked citation
+    setSelectedCitationUrl(citation.url);
   };
 
   return (
@@ -95,9 +146,13 @@ export function ChatModal({ isOpen, onClose }: ChatModalProps) {
                       >
                         <FilesPanel 
                           files={uploadedFiles} 
+                          citations={citations}
+                          selectedCitationUrl={selectedCitationUrl}
                           onClose={() => {
                             setShowFilesPanel(false);
                             setUploadedFiles([]);
+                            setCitations([]);
+                            setSelectedCitationUrl(undefined);
                           }}
                           hideHeader={true}
                         />
@@ -110,6 +165,8 @@ export function ChatModal({ isOpen, onClose }: ChatModalProps) {
                     <ChatContent 
                       onClose={onClose} 
                       onFilesChange={handleFilesChange}
+                      onCitationsChange={handleCitationsChange}
+                      onCitationClick={handleCitationClick}
                       hideHeader={true}
                     />
                   </div>
