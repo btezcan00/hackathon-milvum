@@ -12,11 +12,11 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 
 # Install Python dependencies
-RUN pip install -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Playwright browsers for Crawl4AI
-RUN python -m playwright install chromium
-RUN python -m playwright install-deps chromium
+# Verify playwright is installed and install browsers
+RUN pip show playwright || pip install playwright>=1.40.0
+RUN python -m playwright install --with-deps chromium
 
 # Copy application code
 COPY . .

@@ -81,8 +81,10 @@ export function InlineCitations({ content, citations, onCitationClick }: InlineC
               ))}
             </span>
           );
-        } else {
-          // TypeScript now knows part.type is 'citation' and part.index exists
+        }
+        
+        // TypeScript knows this is a citation type now
+        if (part.type === 'citation' && 'index' in part) {
           const citation = citations[part.index];
           return (
             <button
@@ -99,6 +101,8 @@ export function InlineCitations({ content, citations, onCitationClick }: InlineC
             </button>
           );
         }
+        
+        return null;
       })}
     </>
   );
