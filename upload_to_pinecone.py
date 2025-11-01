@@ -133,7 +133,7 @@ def main():
     EMBEDDINGS_FILE = "parsed_chunks_with_embeddings.json"
     INDEX_NAME = "hackathon-milvum"
     BATCH_SIZE = 100
-    NAMESPACE = "embedding-v3"  # Use embedding-v2 namespace
+    NAMESPACE = "embedding-v4"  # Use embedding-v4 namespace
 
     # Load embeddings
     chunks = load_embeddings(EMBEDDINGS_FILE)
