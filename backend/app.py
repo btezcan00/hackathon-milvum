@@ -4,7 +4,6 @@ import json
 from werkzeug.utils import secure_filename
 import os
 import asyncio
-from services.document_processor import DocumentProcessor
 from services.rag_service import RAGService
 from services.llm_service import EmbeddingService, ChatService
 from services.citation_service import CitationService
@@ -13,6 +12,7 @@ import logging
 from datetime import datetime
 import uuid
 from typing import List, Dict
+from services.document_pipeline import DocumentPipeline
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -41,10 +41,10 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 # Initialize services
 embedding_service = EmbeddingService()
 chat_service = ChatService()
-doc_processor = DocumentProcessor()
 rag_service = RAGService(embedding_service)
 citation_service = CitationService(embedding_service)
 url_selector = URLSelector(chat_service)
+document_pipeline = DocumentPipeline(embedding_service, rag_service.pinecone_client)
 
 # Web crawler will be initialized per request (to avoid keeping browser open)
 def get_web_crawler():
@@ -68,52 +68,67 @@ def health_check():
 
 @app.route('/api/upload', methods=['POST'])
 def upload_file():
-    """Upload and process document"""
+    """
+    Upload and process one or multiple documents.
+    Supports parallel processing and immediate vector search.
+    """
     try:
-        if 'file' not in request.files:
-            return jsonify({'error': 'No file part'}), 400
+        files = request.files.getlist('file')  # Support multiple files
         
-        file = request.files['file']
-        if file.filename == '':
-            return jsonify({'error': 'No selected file'}), 400
+        if not files or files[0].filename == '':
+            return jsonify({'error': 'No files provided'}), 400
         
-        if file and allowed_file(file.filename):
-            filename = secure_filename(file.filename)
-            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            file.save(filepath)
-            
-            logger.info(f"Processing file: {filename}")
-            
-            # Extract text from document
-            text = doc_processor.extract_text(filepath)
-            
-            # Chunk the document
-            chunks = doc_processor.chunk_text(text)
-            
-            # Generate embeddings and store in Qdrant
-            doc_id = rag_service.index_document(
-                chunks=chunks,
-                metadata={
-                    'filename': filename,
-                    'source': filename,
-                    'upload_date': doc_processor.get_current_timestamp()
-                }
-            )
-            
-            # Clean up uploaded file
-            os.remove(filepath)
-            
-            return jsonify({
-                'message': 'File processed successfully',
-                'document_id': doc_id,
-                'chunks_count': len(chunks),
-                'filename': filename
-            }), 200
+        # Validate and save files
+        filepaths = []
+        filenames = []
         
-        return jsonify({'error': 'File type not allowed'}), 400
+        for file in files:
+            if file and allowed_file(file.filename):
+                filename = secure_filename(file.filename)
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                file.save(filepath)
+                filepaths.append(filepath)
+                filenames.append(filename)
+            else:
+                return jsonify({'error': f'File type not allowed: {file.filename}'}), 400
+        
+        logger.info(f"Processing {len(files)} file(s)...")
+        
+        # Process files in parallel
+        results = document_pipeline.process_files_parallel(
+            filepaths=filepaths,
+            filenames=filenames,
+            max_workers=4,  # Adjust based on your server capacity
+            split_length=10,
+            split_overlap=2,
+            batch_size=100
+        )
+        
+        # Clean up uploaded files
+        for filepath in filepaths:
+            try:
+                os.remove(filepath)
+            except Exception as e:
+                logger.warning(f"Could not delete {filepath}: {e}")
+        
+        # Summarize results
+        successful = [r for r in results if r['success']]
+        failed = [r for r in results if not r['success']]
+        
+        total_chunks = sum(r.get('chunks_count', 0) for r in successful)
+        total_vectors = sum(r.get('vectors_uploaded', 0) for r in successful)
+        
+        return jsonify({
+            'message': f'Processed {len(successful)}/{len(results)} file(s) successfully',
+            'successful': successful,
+            'failed': failed,
+            'total_chunks': total_chunks,
+            'total_vectors_uploaded': total_vectors,
+            'files_processed': len(results)
+        }), 200
     
     except Exception as e:
-        logger.error(f"Error processing file: {str(e)}")
+        logger.error(f"Error in upload endpoint: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 def decide_chat_mode(query: str, conversation_history: List[Dict[str, str]]) -> str:

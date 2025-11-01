@@ -12,3 +12,6 @@ gunicorn==21.2.0
 crawl4ai>=0.7.0
 playwright>=1.40.0
 numpy>=1.24.0
+nltk
+pypdf
+python-docx==1.1.0
