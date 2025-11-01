@@ -38,4 +38,4 @@ models/
 backend/keys/*.json
 docs/**
 gcp_func.py
-unique_files/**
+unique_files/**.pnpm-store

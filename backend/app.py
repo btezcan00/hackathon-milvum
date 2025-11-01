@@ -392,18 +392,26 @@ Geef een helder antwoord op basis van de bovenstaande context. Gebruik [1], [2],
                     citation_url = f"file://{doc_name}"
                     logger.warning(f"[Citation] Invalid citation_url, using fallback: {citation_url}")
                 
+                # Get the text for highlighting - it's in metadata, not doc!
+                full_text = metadata.get('text', '') or doc.get('text', '')
+                logger.info(f"[Citation] DOC KEYS: {list(doc.keys())}")
+                logger.info(f"[Citation] Full text length: {len(full_text)}")
+                logger.info(f"[Citation] Full text sample: {full_text[:200] if full_text else 'EMPTY'}")
+                
                 citation = {
                     'id': str(uuid.uuid4()),
                     'url': str(citation_url),  # Ensure it's a string - Use Google Drive link if available, otherwise file:// protocol
                     'title': doc_name,
-                    'snippet': doc.get('text', '')[:300] + ('...' if len(doc.get('text', '')) > 300 else ''),
+                    'snippet': full_text[:300] + ('...' if len(full_text) > 300 else ''),
                     'relevanceScore': doc.get('score', 0.0),
                     'domain': 'Internal Document',
                     'pageNumbers': page_numbers,
                     'documentName': doc_name,
-                    'highlightText': doc.get('text', '')[:100],
+                    'highlightText': full_text,  # Full text for highlighting in PDF viewer
                     'type': 'document'  # Mark as document citation
                 }
+                
+                logger.info(f"[Citation] Citation highlightText length: {len(citation['highlightText'])}")
                 
                 logger.info(f"[Citation] Final citation URL: {citation['url']}")
                 

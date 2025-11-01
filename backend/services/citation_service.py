@@ -173,7 +173,7 @@ class CitationService:
                     'relevanceScore': content.get('relevance_score', 0),
                     'domain': content.get('domain', self._extract_domain(content.get('url', ''))),
                     'crawledAt': content.get('extracted_at', datetime.now().isoformat()),
-                    'highlightText': self._extract_snippet(content.get('text', ''), max_length=100)
+                    'highlightText': content.get('text', '')  # Full text for PDF highlighting
                 }
                 citations.append(citation)
             except Exception as e:

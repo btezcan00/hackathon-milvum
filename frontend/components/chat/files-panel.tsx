@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { X, FileText } from 'lucide-react';
 import { useState, useEffect, useMemo } from 'react';
 import type { Citation } from '@/components/citations/citation-list';
+import { PDFViewerWithHighlights } from '@/components/pdf';
 
 export interface FileWithMetadata {
   file: File;
@@ -401,18 +402,51 @@ export function FilesPanel({ files, citations = [], selectedCitationUrl, onClose
                   });
 
                   if ((selectedSource.type === 'file' || selectedSource.type === 'citation') && selectedSourceUrl) {
-                    // PDF file or citation with URL - show in iframe (works for both local files and Google Drive)
-                    return (
-                      <iframe
-                        key={selectedSourceUrl} // Force re-render if URL changes
-                        src={selectedSourceUrl}
-                        className="w-full h-full border-0"
-                        title={selectedSource.type === 'file' ? selectedSource.data.file.name : selectedSource.data.title || 'Document'}
-                        allow="fullscreen"
-                        onLoad={() => console.log('[FilesPanel] Iframe loaded:', selectedSourceUrl)}
-                        onError={(e) => console.error('[FilesPanel] Iframe error:', e, selectedSourceUrl)}
-                      />
-                    );
+                    // Check if it's a Google Drive URL - use iframe for Google Drive
+                    const isGoogleDriveUrl = selectedSourceUrl.includes('drive.google.com');
+                    
+                    if (isGoogleDriveUrl) {
+                      // Google Drive URLs - use iframe
+                      return (
+                        <iframe
+                          key={selectedSourceUrl}
+                          src={selectedSourceUrl}
+                          className="w-full h-full border-0"
+                          title={selectedSource.type === 'file' ? selectedSource.data.file.name : selectedSource.data.title || 'Document'}
+                          allow="fullscreen"
+                          onLoad={() => console.log('[FilesPanel] Iframe loaded:', selectedSourceUrl)}
+                          onError={(e) => console.error('[FilesPanel] Iframe error:', e, selectedSourceUrl)}
+                        />
+                      );
+                    } else {
+                      // Local PDF or GCS URL - use PDFViewerWithHighlights with highlighting
+                      const citation = selectedSource.type === 'citation' ? selectedSource.data as Citation : null;
+                      
+                      // Debug: Log the full citation object
+                      console.log('[FilesPanel] ========================================');
+                      console.log('[FilesPanel] FULL CITATION OBJECT:', citation);
+                      console.log('[FilesPanel] Citation keys:', citation ? Object.keys(citation) : 'null');
+                      console.log('[FilesPanel] snippet:', citation?.snippet);
+                      console.log('[FilesPanel] highlightText:', citation?.highlightText);
+                      console.log('[FilesPanel] ========================================');
+                      
+                      // Prefer highlightText (full text) over snippet (truncated)
+                      const highlightText = citation?.highlightText || citation?.snippet || '';
+                      const pageNumbers = citation?.pageNumbers || [];
+                      
+                      console.log('[FilesPanel] Final highlightText being passed:', highlightText);
+                      console.log('[FilesPanel] Final highlightText length:', highlightText.length);
+                      
+                      return (
+                        <PDFViewerWithHighlights
+                          key={selectedSourceUrl}
+                          url={selectedSourceUrl}
+                          highlightText={highlightText}
+                          pageNumbers={pageNumbers}
+                          className="w-full h-full"
+                        />
+                      );
+                    }
                   } else if (selectedSource.type === 'file') {
                     // PDF file but URL not ready yet - show loading
                     return (
