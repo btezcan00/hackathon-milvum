@@ -10,8 +10,14 @@ export interface Citation {
   snippet: string;
   relevanceScore: number;
   domain: string;
-  crawledAt: string;
+  crawledAt?: string;
   highlightText?: string;
+  // PDF/document specific fields
+  type?: 'document' | 'web';
+  pageNumbers?: number[];
+  documentName?: string;
+  date?: string;
+  uploadedAt?: string;
 }
 
 interface CitationListProps {
@@ -85,10 +91,31 @@ export function CitationList({ citations, onCitationClick }: CitationListProps) 
                 {citation.snippet}
               </p>
               
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-xs text-gray-500">
                   {citation.domain}
                 </span>
+                {citation.pageNumbers && citation.pageNumbers.length > 0 && (
+                  <span className="text-xs text-gray-500">
+                  · Pages {citation.pageNumbers.join(', ')}
+                </span>
+                )}
+                {citation.date && (
+                  <span className="text-xs text-gray-500">
+                    · {citation.date}
+                  </span>
+                )}
+                {citation.type === 'document' && citation.url && citation.url.startsWith('http') && (
+                  <a
+                    href={citation.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-blue-600 hover:underline"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    · Google Drive
+                  </a>
+                )}
                 <Badge
                   className={`text-xs px-2 py-0.5 ${getScoreColor(citation.relevanceScore)} ${getScoreTextColor(citation.relevanceScore)} border-0`}
                 >

@@ -100,21 +100,29 @@ export function FilesPanel({ files, citations = [], selectedCitationUrl, onClose
     if (selectedSource.type === 'file') {
       return fileUrls.get(selectedSource.data.file.name) || null;
     } else {
-      // Citation - check if it's a web URL or internal document
+      // Citation - check if it's a web URL, Google Drive link, or internal document
       const url = selectedSource.data.url;
       console.log('Citation URL being processed:', url);
       console.log('Full citation data:', selectedSource.data);
       const isWebUrl = url.startsWith('http://') || url.startsWith('https://');
+      const isDriveUrl = url.includes('drive.google.com');
       
-      if (isWebUrl) {
-        console.log('Using web URL for iframe:', url);
+      if (isWebUrl && !isDriveUrl) {
+        // External web URL - show preview (iframes are often blocked)
+        console.log('Web URL citation:', url);
+        return null; // Will show preview instead
+      } else if (isDriveUrl) {
+        // Google Drive link - return the URL to show preview
+        console.log('Google Drive URL:', url);
         return url;
       } else {
         // Internal document - try to match with uploaded files
         const matchingFile = pdfFiles.find(f => {
           const fileName = f.file.name.toLowerCase();
           const title = selectedSource.data.title.toLowerCase();
-          return title.includes(fileName) || fileName.includes(title);
+          const docName = selectedSource.data.documentName?.toLowerCase() || '';
+          return title.includes(fileName) || fileName.includes(title) || 
+                 docName.includes(fileName) || fileName.includes(docName);
         });
         
         if (matchingFile) {
@@ -254,17 +262,33 @@ export function FilesPanel({ files, citations = [], selectedCitationUrl, onClose
                     title={selectedSource.data.file.name}
                   />
                 ) : (
-                  // Citation - show preview first, with option to try iframe
+                  // Citation - show preview with metadata
                   <>
                     {/* Default: Show citation preview with metadata */}
                     <div className="w-full h-full flex flex-col items-center justify-center p-6 bg-white overflow-y-auto">
-                      <Globe className="h-16 w-16 text-blue-500 mb-4" />
+                      {selectedSource.data.type === 'document' ? (
+                        <FileText className="h-16 w-16 text-gray-600 mb-4" />
+                      ) : (
+                        <Globe className="h-16 w-16 text-blue-500 mb-4" />
+                      )}
                       <h3 className="text-base font-semibold text-gray-900 mb-2 text-center max-w-md">
-                        {selectedSource.data.title}
+                        {selectedSource.data.title || selectedSource.data.documentName || 'Source'}
                       </h3>
-                      <p className="text-xs text-gray-500 mb-1">
-                        {selectedSource.data.domain || 'Web Source'}
-                      </p>
+                      <div className="flex flex-col items-center gap-1 mb-2">
+                        <p className="text-xs text-gray-500">
+                          {selectedSource.data.domain || 'Document'}
+                        </p>
+                        {selectedSource.data.pageNumbers && selectedSource.data.pageNumbers.length > 0 && (
+                          <p className="text-xs text-gray-500">
+                            Pages: {selectedSource.data.pageNumbers.join(', ')}
+                          </p>
+                        )}
+                        {selectedSource.data.date && (
+                          <p className="text-xs text-gray-500">
+                            Date: {selectedSource.data.date}
+                          </p>
+                        )}
+                      </div>
                       {selectedSource.data.snippet && (
                         <p className="text-xs text-gray-600 mb-6 mt-4 max-w-lg text-center leading-relaxed line-clamp-6">
                           {selectedSource.data.snippet}
@@ -283,20 +307,28 @@ export function FilesPanel({ files, citations = [], selectedCitationUrl, onClose
                         </div>
                       )}
                       <div className="space-y-3 w-full max-w-sm">
-                        <a
-                          href={selectedSourceUrl || undefined}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="block px-6 py-3 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors text-center"
-                        >
-                          Open in New Tab
-                        </a>
-                        <p className="text-xs text-gray-400 text-center px-4">
-                          Many websites (including government sites) block embedding in iframes for security reasons. Click "Open in New Tab" to view the full page.
-                        </p>
-                        <p className="text-xs text-gray-400 text-center break-all px-4">
-                          {selectedSourceUrl}
-                        </p>
+                        {selectedSourceUrl && (
+                          <a
+                            href={selectedSourceUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="block px-6 py-3 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors text-center"
+                          >
+                            {selectedSourceUrl.includes('drive.google.com') ? 'Open in Google Drive' : 
+                             selectedSource.data.type === 'document' ? 'View Document' : 
+                             'Open in New Tab'}
+                          </a>
+                        )}
+                        {selectedSource.data.type === 'web' && (
+                          <p className="text-xs text-gray-400 text-center px-4">
+                            Many websites (including government sites) block embedding in iframes for security reasons. Click "Open in New Tab" to view the full page.
+                          </p>
+                        )}
+                        {selectedSourceUrl && (
+                          <p className="text-xs text-gray-400 text-center break-all px-4">
+                            {selectedSourceUrl}
+                          </p>
+                        )}
                       </div>
                     </div>
                   </>

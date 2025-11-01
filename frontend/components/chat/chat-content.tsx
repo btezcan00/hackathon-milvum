@@ -275,96 +275,100 @@ export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitat
         throw new Error('Failed to get response');
       }
 
-      // Read the stream
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
+      // Check if response is streaming or JSON
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('text/event-stream')) {
+        // Handle streaming response
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
 
-      if (!reader) {
-        throw new Error('No response body');
-      }
+        if (!reader) {
+          throw new Error('No response body');
+        }
 
-      messageIdCounter.current += 1;
-      let assistantMessage: Message = {
-        id: `assistant-${messageIdCounter.current}`,
-        role: 'assistant',
-        content: '',
-      };
+        messageIdCounter.current += 1;
+        let assistantMessage: Message = {
+          id: `assistant-${messageIdCounter.current}`,
+          role: 'assistant',
+          content: '',
+        };
 
-      setMessages(prev => [...prev, assistantMessage]);
+        setMessages(prev => [...prev, assistantMessage]);
 
-      let hasReceivedContent = false;
-      let errorOccurred = false;
+        let hasReceivedContent = false;
+        let errorOccurred = false;
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-        const chunk = decoder.decode(value);
-        const lines = chunk.split('\n').filter(line => line.trim() !== '');
+          const chunk = decoder.decode(value);
+          const lines = chunk.split('\n').filter(line => line.trim() !== '');
 
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6);
-            if (data === '[DONE]') {
-              if (!hasReceivedContent && !errorOccurred) {
-                assistantMessage.content = 'No answer received. Please check your connection or try again.';
-                setMessages(prev => {
-                  const newMessages = [...prev];
-                  newMessages[newMessages.length - 1] = { ...assistantMessage };
-                  return newMessages;
-                });
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6);
+              if (data === '[DONE]') {
+                if (!hasReceivedContent && !errorOccurred) {
+                  assistantMessage.content = 'No answer received. Please check your connection or try again.';
+                  setMessages(prev => {
+                    const newMessages = [...prev];
+                    newMessages[newMessages.length - 1] = { ...assistantMessage };
+                    return newMessages;
+                  });
+                }
+                continue;
               }
-              continue;
-            }
 
-            try {
-              const json = JSON.parse(data);
-              
-              if (json.type === 'error') {
-                errorOccurred = true;
-                assistantMessage.content = `Error: ${json.error || 'An error occurred'}`;
-                setMessages(prev => {
-                  const newMessages = [...prev];
-                  newMessages[newMessages.length - 1] = { ...assistantMessage };
-                  return newMessages;
-                });
-                break;
+              try {
+                const json = JSON.parse(data);
+                
+                if (json.type === 'error') {
+                  errorOccurred = true;
+                  assistantMessage.content = `Error: ${json.error || 'An error occurred'}`;
+                  setMessages(prev => {
+                    const newMessages = [...prev];
+                    newMessages[newMessages.length - 1] = { ...assistantMessage };
+                    return newMessages;
+                  });
+                  break;
+                }
+                
+                if (json.type === 'text' && json.text) {
+                  hasReceivedContent = true;
+                  assistantMessage.content += json.text;
+                  setMessages(prev => {
+                    const newMessages = [...prev];
+                    newMessages[newMessages.length - 1] = { ...assistantMessage };
+                    return newMessages;
+                  });
+                }
+              } catch (e) {
+                console.error('Error parsing SSE:', e, 'Data:', data);
               }
-              
-              if (json.type === 'text' && json.text) {
-                hasReceivedContent = true;
-                assistantMessage.content += json.text;
-                setMessages(prev => {
-                  const newMessages = [...prev];
-                  newMessages[newMessages.length - 1] = { ...assistantMessage };
-                  return newMessages;
-                });
-              }
-              
-              if (!json.type && json.choices?.[0]?.delta?.content) {
-                hasReceivedContent = true;
-                const content = json.choices[0].delta.content;
-                assistantMessage.content += content;
-                setMessages(prev => {
-                  const newMessages = [...prev];
-                  newMessages[newMessages.length - 1] = { ...assistantMessage };
-                  return newMessages;
-                });
-              }
-            } catch (e) {
-              console.error('Error parsing SSE:', e, 'Data:', data);
             }
           }
         }
-      }
 
-      if (!hasReceivedContent && !errorOccurred && assistantMessage.content === '') {
-        assistantMessage.content = 'No answer received from server.';
-        setMessages(prev => {
-          const newMessages = [...prev];
-          newMessages[newMessages.length - 1] = { ...assistantMessage };
-          return newMessages;
-        });
+        if (!hasReceivedContent && !errorOccurred && assistantMessage.content === '') {
+          assistantMessage.content = 'No answer received from server.';
+          setMessages(prev => {
+            const newMessages = [...prev];
+            newMessages[newMessages.length - 1] = { ...assistantMessage };
+            return newMessages;
+          });
+        }
+      } else {
+        // Handle JSON response (non-streaming)
+        const data = await response.json();
+        messageIdCounter.current += 1;
+        const assistantMessage: Message = {
+          id: `assistant-${messageIdCounter.current}`,
+          role: 'assistant',
+          content: data.answer || 'No answer received.',
+          citations: data.citations || [],  // Include PDF citations
+        };
+        setMessages(prev => [...prev, assistantMessage]);
       }
     } catch (error) {
       console.error('Chat error:', error);
