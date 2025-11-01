@@ -221,7 +221,7 @@ export function ChatUI({ onFileSelected }: ChatUIProps) {
       }
 
       messageIdCounter.current += 1;
-      let assistantMessage: Message = {
+      const assistantMessage: Message = {
         id: `assistant-${messageIdCounter.current}`,
         role: 'assistant',
         content: '',

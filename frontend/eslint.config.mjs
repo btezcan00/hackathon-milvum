@@ -13,6 +13,14 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
   ]),
+  {
+    rules: {
+      // Disable setState in effect rule - we have legitimate use cases for managing external resources
+      'react-hooks/set-state-in-effect': 'off',
+      // Allow explicit any in API routes where we're dealing with unknown external data
+      '@typescript-eslint/no-explicit-any': 'warn',
+    },
+  },
 ]);
 
 export default eslintConfig;

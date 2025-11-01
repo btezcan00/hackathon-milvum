@@ -302,7 +302,7 @@ export function ChatContent({ onClose, onFilesChange, onCitationsChange, onCitat
         }
 
         messageIdCounter.current += 1;
-        let assistantMessage: Message = {
+        const assistantMessage: Message = {
           id: `assistant-${messageIdCounter.current}`,
           role: 'assistant',
           content: '',

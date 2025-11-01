@@ -7,11 +7,11 @@ export async function POST(req: Request) {
     // Backend expects { query } format, but frontend may send { messages }
     // Extract query from messages if needed
     let query = body.query;
-    let conversation_id = body.conversation_id;
+    const conversation_id = body.conversation_id;
 
     if (body.messages && Array.isArray(body.messages) && body.messages.length > 0) {
       // Find the last user message
-      const lastUserMessage = body.messages.slice().reverse().find((msg: any) => msg.role === 'user');
+      const lastUserMessage = body.messages.slice().reverse().find((msg: { role: string; content: string }) => msg.role === 'user');
       if (lastUserMessage) {
         query = lastUserMessage.content;
       }

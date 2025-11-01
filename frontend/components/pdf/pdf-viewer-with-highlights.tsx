@@ -66,6 +66,8 @@ export function PDFViewerWithHighlights({
       ? `/api/proxy-pdf?url=${encodeURIComponent(url)}`
       : url;
 
+    let blobUrl: string | null = null;
+
     fetch(fetchUrl)
       .then(response => {
         if (!response.ok) {
@@ -74,7 +76,7 @@ export function PDFViewerWithHighlights({
         return response.blob();
       })
       .then(blob => {
-        const blobUrl = URL.createObjectURL(blob);
+        blobUrl = URL.createObjectURL(blob);
         setPdfUrl(blobUrl);
         setIsLoading(false);
       })
@@ -84,10 +86,10 @@ export function PDFViewerWithHighlights({
         setIsLoading(false);
       });
 
-    // Cleanup
+    // Cleanup - revoke the blob URL created in this effect
     return () => {
-      if (pdfUrl && pdfUrl.startsWith('blob:')) {
-        URL.revokeObjectURL(pdfUrl);
+      if (blobUrl && blobUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(blobUrl);
       }
     };
   }, [url]);
@@ -249,7 +251,7 @@ export function PDFViewerWithHighlights({
     return {
       onTextLayerRender,
     };
-  }, [sentences, pageNumbers]);
+  }, [sentences]);
 
   const highlightPluginInstance = highlightTextPlugin();
   const defaultLayoutPluginInstance = defaultLayoutPlugin({

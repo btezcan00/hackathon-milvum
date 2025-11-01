@@ -38,11 +38,24 @@ function cleanText(text: string): string {
 }
 
 export function CitationViewer({ citation, isOpen, onClose, uploadedFiles = [] }: CitationViewerProps) {
-  if (!citation) return null;
-  
   const [iframeError, setIframeError] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [showIframe, setShowIframe] = useState(false); // Start with fallback, allow toggle
+  const [showIframe, setShowIframe] = useState(false);
+  const [internalFileUrl, setInternalFileUrl] = useState<string | null>(null);
+
+  // Check if this citation is from an uploaded document
+  const matchingFile = citation ? uploadedFiles.find(f => {
+    const fileName = f.name || f.file.name;
+    const fileNameLower = fileName.toLowerCase();
+    const titleLower = citation.title.toLowerCase();
+    return titleLower.includes(fileNameLower) || fileNameLower.includes(titleLower);
+  }) : null;
+
+  const isInternalDocument = citation ? (!!matchingFile || citation.url.startsWith('file://') || citation.url.startsWith('blob:')) : false;
+  const isPDF = citation ? (matchingFile?.file.type === 'application/pdf' || 
+                citation.url.toLowerCase().endsWith('.pdf') ||
+                (matchingFile && (matchingFile.name || matchingFile.file.name).toLowerCase().endsWith('.pdf'))) : false;
+  const isWebUrl = citation ? (citation.url.startsWith('http://') || citation.url.startsWith('https://')) : false;
   
   // Reset states when citation changes
   useEffect(() => {
@@ -50,7 +63,7 @@ export function CitationViewer({ citation, isOpen, onClose, uploadedFiles = [] }
       console.log('Citation viewer opened with URL:', citation.url);
       setIframeError(false);
       setIsLoading(true);
-      setShowIframe(false); // Default to not showing iframe (many sites block it)
+      setShowIframe(false);
       
       // Check if URL is valid
       try {
@@ -62,28 +75,9 @@ export function CitationViewer({ citation, isOpen, onClose, uploadedFiles = [] }
         setIsLoading(false);
       }
     }
-  }, [isOpen, citation?.url]);
+  }, [isOpen, citation]);
 
-  // Check if this citation is from an uploaded document
-  // Check by matching citation title or URL with uploaded file names
-  const matchingFile = uploadedFiles.find(f => {
-    const fileName = f.name || f.file.name;
-    const fileNameLower = fileName.toLowerCase();
-    const titleLower = citation.title.toLowerCase();
-    return titleLower.includes(fileNameLower) || fileNameLower.includes(titleLower);
-  });
-
-  const isInternalDocument = !!matchingFile || citation.url.startsWith('file://') || citation.url.startsWith('blob:');
-  const isPDF = matchingFile?.file.type === 'application/pdf' || 
-                citation.url.toLowerCase().endsWith('.pdf') ||
-                (matchingFile && (matchingFile.name || matchingFile.file.name).toLowerCase().endsWith('.pdf'));
-
-  // Check if it's a web URL
-  const isWebUrl = citation.url.startsWith('http://') || citation.url.startsWith('https://');
-  
   // Get file URL for internal documents
-  const [internalFileUrl, setInternalFileUrl] = useState<string | null>(null);
-
   useEffect(() => {
     if (matchingFile && isOpen) {
       const url = URL.createObjectURL(matchingFile.file);
@@ -96,6 +90,8 @@ export function CitationViewer({ citation, isOpen, onClose, uploadedFiles = [] }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, matchingFile?.file.name]);
+
+  if (!citation) return null;
 
   return (
     <AnimatePresence>
@@ -213,7 +209,7 @@ export function CitationViewer({ citation, isOpen, onClose, uploadedFiles = [] }
                             Try Preview (may not work)
                           </button>
                           <p className="text-xs text-gray-400 text-center max-w-xs">
-                            Many websites block embedding. If preview doesn't work, use "Open in New Tab".
+                            Many websites block embedding. If preview doesn&apos;t work, use &quot;Open in New Tab&quot;.
                           </p>
                         </div>
                       </div>

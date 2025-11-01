@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { X, FileText } from 'lucide-react';
 import { useClientOnly } from '@/hooks/use-client-only';
 
@@ -11,24 +11,26 @@ interface PDFViewerProps {
 }
 
 export function PDFViewer({ file, fileUrl, onClose }: PDFViewerProps) {
-  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const isClient = useClientOnly();
+  const [objectUrl, setObjectUrl] = useState<string | null>(null);
 
+  // Create and manage object URL for file blobs
   useEffect(() => {
-    if (!isClient) return;
-    
-    if (file && file.type === 'application/pdf') {
-      const url = URL.createObjectURL(file);
-      setPdfUrl(url);
-      return () => {
-        URL.revokeObjectURL(url);
-      };
-    } else if (fileUrl) {
-      setPdfUrl(fileUrl);
-    } else {
-      setPdfUrl(null);
+    if (!isClient || !file || file.type !== 'application/pdf') {
+      setObjectUrl(null);
+      return;
     }
-  }, [file, fileUrl, isClient]);
+
+    const url = URL.createObjectURL(file);
+    setObjectUrl(url);
+    
+    return () => {
+      URL.revokeObjectURL(url);
+    };
+  }, [file, isClient]);
+
+  // Determine which URL to display
+  const pdfUrl = objectUrl || fileUrl;
 
   if (!pdfUrl && !file) {
     return (

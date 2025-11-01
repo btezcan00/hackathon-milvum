@@ -61,11 +61,6 @@ export function FilesPanel({ files, citations = [], selectedCitationUrl, onClose
     return items;
   }, [pdfFiles, citations]);
 
-  // Don't render the panel if there are no sources to display
-  if (sources.length === 0) {
-    return null;
-  }
-
   // Auto-select citation if provided
   useEffect(() => {
     if (selectedCitationUrl && sources.length > 0) {
@@ -270,6 +265,11 @@ export function FilesPanel({ files, citations = [], selectedCitationUrl, onClose
       return null;
     }
   }, [selectedSource, fileUrls, pdfFiles]);
+
+  // Don't render the panel if there are no sources to display
+  if (sources.length === 0) {
+    return null;
+  }
 
   // Helper function to convert Google Drive share link to embeddable viewer URL
   const convertDriveToViewerUrl = (driveUrl: string): string | null => {
