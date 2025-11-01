@@ -1,10 +1,12 @@
 export async function POST(req: Request) {
   try {
     const formData = await req.formData();
-    const file = formData.get('file') as File;
+    
+    // Get all files (supporting multiple file uploads)
+    const files = formData.getAll('file') as File[];
 
-    if (!file) {
-      return new Response(JSON.stringify({ error: 'No file provided' }), {
+    if (!files || files.length === 0 || (files.length === 1 && !files[0])) {
+      return new Response(JSON.stringify({ error: 'No files provided' }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
       });
@@ -12,9 +14,15 @@ export async function POST(req: Request) {
 
     const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5001';
 
-    // Create FormData for backend
+    // Create FormData for backend with all files
     const backendFormData = new FormData();
-    backendFormData.append('file', file);
+    
+    // Append all files with the same key 'file' (backend uses getlist('file'))
+    files.forEach((file) => {
+      if (file) {
+        backendFormData.append('file', file);
+      }
+    });
 
     // Forward to Flask backend
     const response = await fetch(`${backendUrl}/api/upload`, {

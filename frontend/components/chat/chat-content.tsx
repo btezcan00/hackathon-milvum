@@ -12,6 +12,7 @@ import type { FileWithMetadata } from './files-panel';
 interface ChatContentProps {
   onClose: () => void;
   onFilesChange: (files: FileWithMetadata[]) => void;
+  hideHeader?: boolean;
 }
 
 interface CrawledWebsite {
@@ -28,7 +29,7 @@ interface Message {
   crawledWebsites?: CrawledWebsite[];
 }
 
-export function ChatContent({ onClose, onFilesChange }: ChatContentProps) {
+export function ChatContent({ onClose, onFilesChange, hideHeader = false }: ChatContentProps) {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [uploadedFiles, setUploadedFiles] = useState<FileWithMetadata[]>([]);
@@ -73,32 +74,41 @@ export function ChatContent({ onClose, onFilesChange }: ChatContentProps) {
     if (validFiles.length > 0) {
       setUploading(true);
       try {
-        const fileData: FileWithMetadata[] = validFiles.map(file => ({
-          file,
-          uploadedAt: new Date()
-        }));
-        
-        const uploadPromises = validFiles.map(async (file) => {
-          const formData = new FormData();
-          formData.append('file', file);
-
-          const response = await fetch('/api/upload', {
-            method: 'POST',
-            body: formData,
-          });
-
-          if (!response.ok) {
-            throw new Error(`Failed to upload ${file.name}`);
-          }
-
-          return response.json();
+        // Create a single FormData with all files
+        const formData = new FormData();
+        validFiles.forEach((file) => {
+          formData.append('file', file); // Same key for all files - backend uses getlist('file')
         });
 
-        await Promise.all(uploadPromises);
+        // Send all files in a single request
+        const response = await fetch('/api/upload', {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({ error: 'Upload failed' }));
+          throw new Error(errorData.error || `Failed to upload files`);
+        }
+
+        const result = await response.json();
+        
+        // Create file metadata for successfully uploaded files
+        const fileData: FileWithMetadata[] = validFiles.map((file, index) => ({
+          file,
+          uploadedAt: new Date(),
+          status: result.successful?.[index] ? 'success' : 'error',
+        }));
+        
         setUploadedFiles(prev => [...prev, ...fileData]);
+        
+        // Show success message
+        if (result.successful && result.successful.length > 0) {
+          console.log(`Successfully uploaded ${result.successful.length} file(s)`);
+        }
       } catch (error) {
         console.error('Upload error:', error);
-        alert('An error occurred while uploading files. Please try again.');
+        alert(error instanceof Error ? error.message : 'An error occurred while uploading files. Please try again.');
       } finally {
         setUploading(false);
       }
@@ -322,18 +332,20 @@ export function ChatContent({ onClose, onFilesChange }: ChatContentProps) {
 
   return (
     <div className="flex flex-col h-full bg-white">
-      {/* Header */}
-      <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-gray-900">Chat</h2>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onClose}
-          className="text-gray-600 hover:text-gray-900"
-        >
-          Close
-        </Button>
-      </div>
+      {/* Header - only show if not hidden */}
+      {!hideHeader && (
+        <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-gray-900">Chat</h2>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onClose}
+            className="text-gray-600 hover:text-gray-900"
+          >
+            Close
+          </Button>
+        </div>
+      )}
 
       {/* Messages Area */}
       <div 
