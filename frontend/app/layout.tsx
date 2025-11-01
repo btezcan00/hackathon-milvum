@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Document Chat Assistant - Overheid",
-  description: "Ask questions about your uploaded documents",
+  title: "deepWOO",
+  description: "happy halloween, woooooo",
 };
 
 export default function RootLayout({

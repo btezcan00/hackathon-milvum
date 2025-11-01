@@ -2,7 +2,6 @@
 
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { ExternalLink } from 'lucide-react';
 
 export interface Citation {
   id: string;
@@ -58,12 +57,12 @@ export function CitationList({ citations, onCitationClick }: CitationListProps) 
   };
 
   return (
-    <div className="mt-4 space-y-3">
-      <div className="flex items-center gap-2 mb-2">
-        <span className="text-sm font-bold text-gray-700" style={{ fontFamily: 'Verdana, sans-serif' }}>
-          Bronnen ({citations.length}):
-        </span>
-      </div>
+      <div className="mt-4 space-y-3">
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-xs font-medium text-gray-600">
+            Sources ({citations.length}):
+          </span>
+        </div>
       
       {citations.map((citation, index) => (
         <Card
@@ -77,28 +76,26 @@ export function CitationList({ citations, onCitationClick }: CitationListProps) 
                 <span className="text-xs font-bold text-[#154274] bg-[#154274]/10 px-2 py-1 rounded">
                   [{index + 1}]
                 </span>
-                <h4 className="text-sm font-bold text-black truncate" style={{ fontFamily: 'Verdana, sans-serif' }}>
+                <h4 className="text-sm font-medium text-gray-900 truncate">
                   {citation.title}
                 </h4>
               </div>
               
-              <p className="text-xs text-gray-600 mb-2 line-clamp-2" style={{ fontFamily: 'Verdana, sans-serif' }}>
+              <p className="text-xs text-gray-600 mb-2 line-clamp-2">
                 {citation.snippet}
               </p>
               
               <div className="flex items-center gap-2">
-                <span className="text-xs text-gray-500" style={{ fontFamily: 'Verdana, sans-serif' }}>
+                <span className="text-xs text-gray-500">
                   {citation.domain}
                 </span>
                 <Badge
                   className={`text-xs px-2 py-0.5 ${getScoreColor(citation.relevanceScore)} ${getScoreTextColor(citation.relevanceScore)} border-0`}
                 >
-                  Relevante: {formatScore(citation.relevanceScore)}
+                  {formatScore(citation.relevanceScore)}
                 </Badge>
               </div>
             </div>
-            
-            <ExternalLink className="h-4 w-4 text-[#154274] flex-shrink-0 mt-1" />
           </div>
         </Card>
       ))}
