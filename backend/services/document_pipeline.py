@@ -8,6 +8,7 @@ import nltk
 
 from services.llm_service import EmbeddingService
 from services.pinecone_service import PineconeRAGClient
+from repository.google_storeage import GCSHelper
 
 logger = logging.getLogger(__name__)
 
@@ -22,15 +23,17 @@ except LookupError:
 class DocumentPipeline:
     """
     Complete pipeline for document processing:
-    1. Extract text from PDF/DOCX/TXT
-    2. Chunk text with sentence awareness and page tracking
-    3. Generate embeddings
-    4. Upload to Pinecone
+    1. Upload original file to GCS
+    2. Extract text from PDF/DOCX/TXT
+    3. Chunk text with sentence awareness and page tracking
+    4. Generate embeddings
+    5. Upload to Pinecone with GCS metadata
     """
     
     def __init__(self, embedding_service: EmbeddingService, pinecone_client: PineconeRAGClient):
         self.embedding_service = embedding_service
         self.pinecone_client = pinecone_client
+        self.gcs_helper = GCSHelper()
         
     def extract_text_with_pages(self, pdf_path: str) -> List[Dict]:
         """
@@ -138,16 +141,31 @@ class DocumentPipeline:
         filename: str,
         split_length: int = 10,
         split_overlap: int = 2,
-        batch_size: int = 100
+        batch_size: int = 100,
+        upload_to_gcs: bool = True
     ) -> Dict[str, Any]:
         """
-        Process a single file: extract, chunk, embed, upload to Pinecone.
+        Process a single file: upload to GCS, extract, chunk, embed, upload to Pinecone.
         
         Returns:
-            Dict with processing results
+            Dict with processing results including GCS URL
         """
         try:
             logger.info(f"Processing file: {filename}")
+            
+            # Step 1: Upload original file to GCS
+            gcs_metadata = None
+            if upload_to_gcs:
+                try:
+                    gcs_metadata = self.gcs_helper.upload_file(
+                        local_filepath=filepath,
+                        destination_blob_name=None,  # Auto-generate with timestamp
+                        make_public=False  # Use signed URLs instead
+                    )
+                    logger.info(f"✓ Uploaded to GCS: {gcs_metadata['blob_name']}")
+                except Exception as e:
+                    logger.error(f"Failed to upload to GCS: {e}")
+                    # Continue processing even if GCS upload fails
             
             # Remove anonymization markers from filename
             document_name = os.path.splitext(filename)[0]
@@ -163,10 +181,10 @@ class DocumentPipeline:
                     return {
                         'success': False,
                         'filename': filename,
-                        'error': 'No text extracted from PDF'
+                        'error': 'No text extracted from PDF',
+                        'gcs_metadata': gcs_metadata
                     }
                 
-                # Create chunks with page tracking
                 chunks = self.create_chunks_with_pages(
                     sentences_with_pages,
                     document_name,
@@ -174,20 +192,18 @@ class DocumentPipeline:
                     split_overlap
                 )
             else:
-                # For non-PDF files, use simple text extraction
                 text = self.extract_text_from_file(filepath)
                 
                 if not text:
                     return {
                         'success': False,
                         'filename': filename,
-                        'error': 'No text extracted'
+                        'error': 'No text extracted',
+                        'gcs_metadata': gcs_metadata
                     }
                 
-                # Simple sentence-based chunking
                 sentences = nltk.sent_tokenize(text)
                 sentences_with_pages = [{'text': s, 'page_number': 1} for s in sentences]
-                
                 chunks = self.create_chunks_with_pages(
                     sentences_with_pages,
                     document_name,
@@ -199,27 +215,33 @@ class DocumentPipeline:
                 return {
                     'success': False,
                     'filename': filename,
-                    'error': 'No chunks created'
+                    'error': 'No chunks created',
+                    'gcs_metadata': gcs_metadata
                 }
             
             logger.info(f"Created {len(chunks)} chunks for {filename}")
             
-            # Generate embeddings for all chunks
-            logger.info(f"Generating embeddings for {len(chunks)} chunks...")
+            # Generate embeddings
             texts = [chunk['text'] for chunk in chunks]
             embeddings = self.embedding_service.get_embeddings(texts)
             
-            # Prepare documents for Pinecone
+            # Prepare documents for Pinecone with GCS metadata
             documents = []
             vectors = []
             
             for chunk, embedding in zip(chunks, embeddings):
-                # Flatten metadata
                 doc = {
                     'text': chunk['text'],
                     'document_name': chunk['metadata']['document_name'],
-                    'page_numbers': [str(p) for p in chunk['metadata']['page_numbers']]  # Convert to strings
+                    'page_numbers': [str(p) for p in chunk['metadata']['page_numbers']]
                 }
+                
+                # Add GCS metadata if available
+                if gcs_metadata:
+                    doc['gcs_url'] = gcs_metadata['url']
+                    doc['gcs_blob_name'] = gcs_metadata['blob_name']
+                    doc['gcs_bucket'] = gcs_metadata['bucket']
+                
                 documents.append(doc)
                 vectors.append(embedding)
             
@@ -237,7 +259,8 @@ class DocumentPipeline:
                 'filename': filename,
                 'document_name': document_name,
                 'chunks_count': len(chunks),
-                'vectors_uploaded': len(vectors)
+                'vectors_uploaded': len(vectors),
+                'gcs_metadata': gcs_metadata
             }
             
         except Exception as e:
@@ -245,8 +268,59 @@ class DocumentPipeline:
             return {
                 'success': False,
                 'filename': filename,
-                'error': str(e)
+                'error': str(e),
+                'gcs_metadata': gcs_metadata
             }
+    
+    def download_and_process_from_gcs(
+        self,
+        blob_name: str,
+        split_length: int = 10,
+        split_overlap: int = 2,
+        batch_size: int = 100
+    ) -> Dict[str, Any]:
+        """
+        Download a file from GCS and process it.
+        
+        Args:
+            blob_name: Path to file in GCS bucket
+            
+        Returns:
+            Processing results
+        """
+        temp_dir = '/tmp/gcs_downloads'
+        os.makedirs(temp_dir, exist_ok=True)
+        
+        filename = os.path.basename(blob_name)
+        local_path = os.path.join(temp_dir, filename)
+        
+        try:
+            # Download from GCS
+            self.gcs_helper.download_file(blob_name, local_path)
+            
+            # Process the file (don't re-upload to GCS since it's already there)
+            result = self.process_single_file(
+                filepath=local_path,
+                filename=filename,
+                split_length=split_length,
+                split_overlap=split_overlap,
+                batch_size=batch_size,
+                upload_to_gcs=False  # Already in GCS
+            )
+            
+            # Add GCS metadata manually
+            if result['success']:
+                result['gcs_metadata'] = {
+                    'blob_name': blob_name,
+                    'url': self.gcs_helper.get_signed_url(blob_name)
+                }
+            
+            return result
+            
+        finally:
+            # Clean up downloaded file
+            if os.path.exists(local_path):
+                os.remove(local_path)
     
     def process_files_parallel(
         self,

@@ -16,6 +16,7 @@ from datetime import datetime
 import uuid
 from typing import List, Dict
 from services.document_pipeline import DocumentPipeline
+from repository.google_storeage import GCSHelper
 
 # Load environment variables from .env file
 load_dotenv()
@@ -53,6 +54,7 @@ rag_service = RAGService(embedding_service)
 citation_service = CitationService(embedding_service)
 url_selector = URLSelector(groq_service)  # Use Groq for fast URL selection
 document_pipeline = DocumentPipeline(embedding_service, rag_service.pinecone_client)
+gcs_helper = GCSHelper()
 
 # Web crawler will be initialized per request (to avoid keeping browser open)
 def get_web_crawler():
@@ -78,7 +80,7 @@ def health_check():
 def upload_file():
     """
     Upload and process one or multiple documents.
-    Supports parallel processing and immediate vector search.
+    Files are uploaded to GCS and processed in parallel for immediate vector search.
     """
     try:
         files = request.files.getlist('file')  # Support multiple files
@@ -102,11 +104,11 @@ def upload_file():
         
         logger.info(f"Processing {len(files)} file(s)...")
         
-        # Process files in parallel
+        # Process files in parallel (includes GCS upload)
         results = document_pipeline.process_files_parallel(
             filepaths=filepaths,
             filenames=filenames,
-            max_workers=4,  # Adjust based on your server capacity
+            max_workers=4,
             split_length=10,
             split_overlap=2,
             batch_size=100
@@ -126,13 +128,26 @@ def upload_file():
         total_chunks = sum(r.get('chunks_count', 0) for r in successful)
         total_vectors = sum(r.get('vectors_uploaded', 0) for r in successful)
         
+        # Extract GCS URLs from successful uploads
+        gcs_files = [
+            {
+                'filename': r['filename'],
+                'document_name': r['document_name'],
+                'gcs_url': r['gcs_metadata']['url'] if r.get('gcs_metadata') else None,
+                'gcs_blob_name': r['gcs_metadata']['blob_name'] if r.get('gcs_metadata') else None,
+                'chunks_count': r['chunks_count']
+            }
+            for r in successful if r.get('gcs_metadata')
+        ]
+        
         return jsonify({
             'message': f'Processed {len(successful)}/{len(results)} file(s) successfully',
             'successful': successful,
             'failed': failed,
             'total_chunks': total_chunks,
             'total_vectors_uploaded': total_vectors,
-            'files_processed': len(results)
+            'files_processed': len(results),
+            'gcs_files': gcs_files
         }), 200
     
     except Exception as e:
@@ -720,6 +735,68 @@ def list_conversations():
         }), 200
     except Exception as e:
         logger.error(f"Error listing conversations: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/gcs/list', methods=['GET'])
+def list_gcs_files():
+    """List files in GCS bucket"""
+    try:
+        prefix = request.args.get('prefix', 'documents/')
+        max_results = int(request.args.get('max_results', 100))
+        
+        files = gcs_helper.list_files(prefix=prefix, max_results=max_results)
+        
+        return jsonify({
+            'files': files,
+            'count': len(files)
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error listing GCS files: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/gcs/process', methods=['POST'])
+def process_gcs_file():
+    """Process a file that's already in GCS"""
+    try:
+        data = request.get_json()
+        blob_name = data.get('blob_name')
+        
+        if not blob_name:
+            return jsonify({'error': 'blob_name is required'}), 400
+        
+        logger.info(f"Processing file from GCS: {blob_name}")
+        
+        result = document_pipeline.download_and_process_from_gcs(
+            blob_name=blob_name,
+            split_length=10,
+            split_overlap=2,
+            batch_size=100
+        )
+        
+        return jsonify(result), 200
+        
+    except Exception as e:
+        logger.error(f"Error processing GCS file: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/gcs/url/<path:blob_name>', methods=['GET'])
+def get_gcs_signed_url(blob_name):
+    """Get a signed URL for a file in GCS"""
+    try:
+        days = int(request.args.get('days', 7))
+        url = gcs_helper.get_signed_url(blob_name, expiration_days=days)
+        
+        return jsonify({
+            'url': url,
+            'blob_name': blob_name,
+            'expires_in_days': days
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error generating signed URL: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
